@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: spring-oidc-cli
+  main:
+    web-application-type: none
+    banner-mode: "off"
+
+logging:
+  level:
+    root: WARN
+
+app:
+  oidc:
+    # Environment variables override these values.
+    issuer-uri: ${OIDC_ISSUER_URI:http://localhost:8080/realms/demo}
+    client-id: ${OIDC_CLIENT_ID:oidc-cli}
+    client-secret: ${OIDC_CLIENT_SECRET:}
+    scope: ${OIDC_SCOPE:openid profile email}
+    client-authentication: ${OIDC_CLIENT_AUTHENTICATION:NONE}
+    poll-timeout: ${OIDC_POLL_TIMEOUT:PT5M}
+    verify-id-token: ${OIDC_VERIFY_ID_TOKEN:true}
+    print-access-token: ${OIDC_PRINT_ACCESS_TOKEN:false}
+    allow-http-localhost: ${OIDC_ALLOW_HTTP_LOCALHOST:true}

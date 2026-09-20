@@ -1,0 +1,67 @@
+{
+  "clientId": "demo-client",
+  "name": "demo",
+  "description": "",
+  "rootUrl": "http://localhost:8080",
+  "adminUrl": "https://localhost:8080",
+  "baseUrl": "http://localhost:8080",
+  "surrogateAuthRequired": false,
+  "enabled": true,
+  "alwaysDisplayInConsole": false,
+  "clientAuthenticatorType": "client-secret",
+  "redirectUris": [
+    "*"
+  ],
+  "webOrigins": [
+    "+"
+  ],
+  "notBefore": 0,
+  "bearerOnly": false,
+  "consentRequired": false,
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": true,
+  "serviceAccountsEnabled": false,
+  "publicClient": true,
+  "frontchannelLogout": true,
+  "protocol": "openid-connect",
+  "attributes": {
+    "logout.confirmation.enabled": "false",
+    "client.secret.creation.time": "1789931620",
+    "standard.token.exchange.enabled": "false",
+    "oauth2.jwt.authorization.grant.enabled": "false",
+    "post.logout.redirect.uris": "http://localhost:8080/*",
+    "frontchannel.logout.session.required": "true",
+    "oauth2.device.authorization.grant.enabled": "true",
+    "backchannel.logout.revoke.offline.tokens": "false",
+    "realm_client": "false",
+    "oidc.ciba.grant.enabled": "false",
+    "backchannel.logout.session.required": "true",
+    "display.on.consent.screen": "false",
+    "ssf.enabled": "false",
+    "dpop.bound.access.tokens": "false"
+  },
+  "authenticationFlowBindingOverrides": {},
+  "fullScopeAllowed": true,
+  "nodeReRegistrationTimeout": -1,
+  "defaultClientScopes": [
+    "web-origins",
+    "acr",
+    "roles",
+    "profile",
+    "basic",
+    "email"
+  ],
+  "optionalClientScopes": [
+    "address",
+    "phone",
+    "offline_access",
+    "organization",
+    "microprofile-jwt"
+  ],
+  "access": {
+    "view": true,
+    "configure": true,
+    "manage": true
+  }
+}

@@ -1,0 +1,17 @@
+# Example external config file.
+# Run with:
+#   java -jar target/spring-oidc-cli-0.1.0.jar login \
+#     --spring.config.additional-location=file:./config/application-example.yml
+
+app:
+  oidc:
+    issuer-uri: http://localhost:7777/realms/demoi
+    client-id: demo-client
+    client-secret: 
+    scope: openid profile email
+    client-authentication: NONE
+    poll-timeout: PT5M
+    verify-id-token: true
+    print-access-token: false
+    allow-http-localhost: true
+
