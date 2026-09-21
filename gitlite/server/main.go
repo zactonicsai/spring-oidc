@@ -1,34 +1,37 @@
-// gitlite server: a tiny git-like versioned file server.
+// gitlite: a tiny GitHub-style git server in Go.
 //
-// Storage layout (under -dir):
+// Speaks git's smart HTTP protocol, so the standard git client works:
 //
-//	<repo>/files/<name>.v<N>   one copy per file per version it was added in
-//	<repo>/meta.json           history of every add (version, date, files, bytes)
+//	git clone http://host:8080/myrepo.git
+//	git push  http://host:8080/newrepo.git main     (repo is created on first push)
+//	git pull
+//	git checkout v3                                  (every push is tagged v1, v2, ...)
 //
-// Endpoints (no auth):
+// On every push the server records a new version:
 //
-//	POST /{repo}/add              multipart upload; creates a new version
-//	GET  /{repo}/clone            tar of latest snapshot (same as pull)
-//	GET  /{repo}/pull[?version=N] tar of snapshot at version N (default latest)
-//	GET  /{repo}/versions         meta.json (list of all versions)
-//	GET  /{repo}/file/{name}[?version=N]  single file at version N
+//	<dir>/<repo>.git/              bare git repository
+//	<dir>/<repo>.git/files/<path>.v<N>   copy of each file changed in version N
+//	<dir>/<repo>.git/meta.json     every push: version, date, commit, author, message, files, bytes
 //
-// A snapshot at version N = for each file name, the newest copy with version <= N.
+// Extra endpoints:
+//
+//	GET /                          list repos
+//	GET /{repo}/versions           meta.json
+//	GET /{repo}/pull?version=N     tar of the repo at version N (default latest)
 package main
 
 import (
-	"archive/tar"
+	"bytes"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
+	"net/http/cgi"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,9 +41,11 @@ import (
 type Add struct {
 	Version int       `json:"version"`
 	Date    time.Time `json:"date"`
+	Commit  string    `json:"commit"`
+	Author  string    `json:"author"`
+	Message string    `json:"message"`
 	Files   []string  `json:"files"`
 	Bytes   int64     `json:"bytes"`
-	Message string    `json:"message,omitempty"`
 }
 
 type Meta struct {
@@ -51,204 +56,242 @@ type Meta struct {
 }
 
 var (
-	root     string
-	mu       sync.Mutex // one writer at a time; simple and safe enough
-	nameRe   = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
-	suffixRe = regexp.MustCompile(`^(.*)\.v(\d+)$`)
+	root   string
+	mu     sync.Mutex
+	nameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 )
 
 func main() {
 	flag.StringVar(&root, "dir", "./repos", "directory where repositories are stored")
 	port := flag.String("port", "8080", "port to listen on")
 	flag.Parse()
+	var err error
+	if root, err = filepath.Abs(root); err != nil {
+		log.Fatal(err)
+	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		log.Fatal(err)
 	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /{repo}/add", handleAdd)
-	mux.HandleFunc("GET /{repo}/clone", handlePull)
-	mux.HandleFunc("GET /{repo}/pull", handlePull)
-	mux.HandleFunc("GET /{repo}/versions", handleVersions)
-	mux.HandleFunc("GET /{repo}/file/{name}", handleFile)
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
-		entries, _ := os.ReadDir(root)
-		var repos []string
-		for _, e := range entries {
-			if e.IsDir() {
-				repos = append(repos, e.Name())
-			}
-		}
-		writeJSON(w, map[string]any{"repos": repos})
-	})
+	backend, err := exec.Command("git", "--exec-path").Output()
+	if err != nil {
+		log.Fatal("git not found: ", err)
+	}
+	gitCGI := &cgi.Handler{
+		Path:       filepath.Join(strings.TrimSpace(string(backend)), "git-http-backend"),
+		Env:        []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1"},
+		InheritEnv: []string{"PATH", "HOME"},
+	}
 
 	log.Printf("gitlite serving %s on :%s", root, *port)
-	log.Fatal(http.ListenAndServe(":"+*port, logRequests(mux)))
+	log.Fatal(http.ListenAndServe(":"+*port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("%s %s", r.Method, r.URL)
+		route(w, r, gitCGI)
+	})))
 }
 
-// ---------- handlers ----------
-
-func handleAdd(w http.ResponseWriter, r *http.Request) {
-	repo := r.PathValue("repo")
+// route: "/" -> list; "/{repo}/versions" and "/{repo}/pull" -> ours; everything else -> git.
+func route(w http.ResponseWriter, r *http.Request, gitCGI *cgi.Handler) {
+	parts := strings.SplitN(strings.Trim(r.URL.Path, "/"), "/", 2)
+	if parts[0] == "" {
+		listRepos(w)
+		return
+	}
+	repo := strings.TrimSuffix(parts[0], ".git")
 	if !nameRe.MatchString(repo) {
 		http.Error(w, "bad repo name", 400)
 		return
 	}
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
-		http.Error(w, err.Error(), 400)
-		return
+	rest := ""
+	if len(parts) > 1 {
+		rest = parts[1]
 	}
-	files := r.MultipartForm.File["file"]
-	if len(files) == 0 {
-		http.Error(w, "no files (use form field 'file')", 400)
+	switch rest {
+	case "versions":
+		handleVersions(w, repo)
+		return
+	case "pull":
+		handlePull(w, r, repo)
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-
-	meta, err := loadMeta(repo, true)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	ver := meta.Latest + 1
-	add := Add{Version: ver, Date: time.Now().UTC(), Message: r.FormValue("message")}
-
-	for _, fh := range files {
-		name := filepath.Base(fh.Filename)
-		if !nameRe.MatchString(name) || suffixRe.MatchString(name) {
-			http.Error(w, "bad file name: "+fh.Filename, 400)
+	// --- git smart HTTP ---
+	push := r.URL.Query().Get("service") == "git-receive-pack" || rest == "git-receive-pack"
+	if _, err := os.Stat(gitDir(repo)); err != nil {
+		if !push {
+			http.Error(w, "repo not found", 404)
 			return
 		}
-		src, err := fh.Open()
-		if err != nil {
+		if err := initRepo(repo); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		dst, err := os.Create(filepath.Join(filesDir(repo), fmt.Sprintf("%s.v%d", name, ver)))
-		if err != nil {
-			src.Close()
-			http.Error(w, err.Error(), 500)
-			return
+	}
+	r.URL.Path = "/" + repo + ".git/" + rest // normalise so PATH_INFO always has .git
+	gitCGI.ServeHTTP(w, r)
+	if push && r.Method == "POST" {
+		mu.Lock()
+		if err := snapshot(repo); err != nil {
+			log.Printf("snapshot %s: %v", repo, err)
 		}
-		n, err := io.Copy(dst, src)
-		src.Close()
-		dst.Close()
-		if err != nil {
-			http.Error(w, err.Error(), 500)
-			return
-		}
-		add.Files = append(add.Files, name)
-		add.Bytes += n
-	}
-	sort.Strings(add.Files)
-
-	meta.Latest = ver
-	meta.Adds = append(meta.Adds, add)
-	if err := saveMeta(repo, meta); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	writeJSON(w, add)
-}
-
-func handlePull(w http.ResponseWriter, r *http.Request) {
-	repo := r.PathValue("repo")
-	meta, err := loadMeta(repo, false)
-	if err != nil {
-		http.Error(w, err.Error(), 404)
-		return
-	}
-	ver, err := parseVersion(r.URL.Query().Get("version"), meta.Latest)
-	if err != nil {
-		http.Error(w, err.Error(), 400)
-		return
-	}
-	snap, err := snapshot(repo, ver)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/x-tar")
-	w.Header().Set("X-Gitlite-Version", strconv.Itoa(ver))
-	tw := tar.NewWriter(w)
-	defer tw.Close()
-	for _, name := range sortedKeys(snap) {
-		path := snap[name]
-		st, err := os.Stat(path)
-		if err != nil {
-			return
-		}
-		tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: st.Size(), ModTime: st.ModTime()})
-		f, err := os.Open(path)
-		if err != nil {
-			return
-		}
-		io.Copy(tw, f)
-		f.Close()
+		mu.Unlock()
 	}
 }
 
-func handleVersions(w http.ResponseWriter, r *http.Request) {
-	meta, err := loadMeta(r.PathValue("repo"), false)
+// ---------- handlers ----------
+
+func listRepos(w http.ResponseWriter) {
+	entries, _ := os.ReadDir(root)
+	repos := []string{}
+	for _, e := range entries {
+		if e.IsDir() && strings.HasSuffix(e.Name(), ".git") {
+			repos = append(repos, strings.TrimSuffix(e.Name(), ".git"))
+		}
+	}
+	writeJSON(w, map[string]any{"repos": repos})
+}
+
+func handleVersions(w http.ResponseWriter, repo string) {
+	meta, err := loadMeta(repo)
 	if err != nil {
-		http.Error(w, err.Error(), 404)
+		http.Error(w, "repo not found", 404)
 		return
 	}
 	writeJSON(w, meta)
 }
 
-func handleFile(w http.ResponseWriter, r *http.Request) {
-	repo, name := r.PathValue("repo"), r.PathValue("name")
-	meta, err := loadMeta(repo, false)
+func handlePull(w http.ResponseWriter, r *http.Request, repo string) {
+	meta, err := loadMeta(repo)
 	if err != nil {
-		http.Error(w, err.Error(), 404)
+		http.Error(w, "repo not found", 404)
 		return
 	}
-	ver, err := parseVersion(r.URL.Query().Get("version"), meta.Latest)
-	if err != nil {
-		http.Error(w, err.Error(), 400)
+	v := r.URL.Query().Get("version")
+	ver := meta.Latest
+	if v != "" && v != "latest" {
+		n, err := strconv.Atoi(strings.TrimPrefix(v, "v"))
+		if err != nil || n < 1 || n > meta.Latest {
+			http.Error(w, fmt.Sprintf("invalid version %q (latest is %d)", v, meta.Latest), 400)
+			return
+		}
+		ver = n
+	}
+	if ver == 0 {
+		http.Error(w, "repo is empty", 404)
 		return
 	}
-	snap, err := snapshot(repo, ver)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	path, ok := snap[name]
-	if !ok {
-		http.Error(w, "file not in version "+strconv.Itoa(ver), 404)
-		return
-	}
-	http.ServeFile(w, r, path)
+	w.Header().Set("Content-Type", "application/x-tar")
+	w.Header().Set("X-Gitlite-Version", strconv.Itoa(ver))
+	cmd := exec.Command("git", "--git-dir="+gitDir(repo), "archive", "--format=tar", "v"+strconv.Itoa(ver))
+	cmd.Stdout = w
+	cmd.Run()
 }
 
-// ---------- storage helpers ----------
+// ---------- git helpers ----------
 
-func filesDir(repo string) string { return filepath.Join(root, repo, "files") }
-func metaPath(repo string) string { return filepath.Join(root, repo, "meta.json") }
+func gitDir(repo string) string   { return filepath.Join(root, repo+".git") }
+func metaPath(repo string) string { return filepath.Join(gitDir(repo), "meta.json") }
+func filesDir(repo string) string { return filepath.Join(gitDir(repo), "files") }
 
-func loadMeta(repo string, create bool) (*Meta, error) {
-	if !nameRe.MatchString(repo) {
-		return nil, errors.New("bad repo name")
+func git(repo string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"--git-dir=" + gitDir(repo)}, args...)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(stderr.String()))
 	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func initRepo(repo string) error {
+	if err := exec.Command("git", "init", "--bare", "-b", "main", gitDir(repo)).Run(); err != nil {
+		return err
+	}
+	if _, err := git(repo, "config", "http.receivepack", "true"); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filesDir(repo), 0o755); err != nil {
+		return err
+	}
+	return saveMeta(repo, &Meta{Repo: repo, Created: time.Now().UTC(), Adds: []Add{}})
+}
+
+// snapshot records the pushed HEAD as a new version: copies changed files to
+// files/<path>.v<N>, tags the commit v<N>, appends an entry to meta.json.
+func snapshot(repo string) error {
+	head, err := git(repo, "rev-parse", "HEAD")
+	if err != nil { // HEAD points at a branch that was never pushed (e.g. master); repoint it
+		branches, berr := git(repo, "for-each-ref", "--format=%(refname)", "refs/heads")
+		if berr != nil || branches == "" {
+			return nil // nothing pushed yet
+		}
+		git(repo, "symbolic-ref", "HEAD", strings.Split(branches, "\n")[0])
+		if head, err = git(repo, "rev-parse", "HEAD"); err != nil {
+			return err
+		}
+	}
+	meta, err := loadMeta(repo)
+	if err != nil {
+		return err
+	}
+	if n := len(meta.Adds); n > 0 && meta.Adds[n-1].Commit == head {
+		return nil // nothing new
+	}
+
+	ver := meta.Latest + 1
+	var files string
+	if len(meta.Adds) > 0 {
+		files, err = git(repo, "diff", "--name-only", "--diff-filter=ACMR", meta.Adds[len(meta.Adds)-1].Commit, head)
+	}
+	if err != nil || len(meta.Adds) == 0 { // first push or history rewritten: take everything
+		if files, err = git(repo, "ls-tree", "-r", "--name-only", head); err != nil {
+			return err
+		}
+	}
+	add := Add{Version: ver, Date: time.Now().UTC(), Commit: head, Files: []string{}}
+	add.Author, _ = git(repo, "log", "-1", "--format=%an <%ae>", head)
+	add.Message, _ = git(repo, "log", "-1", "--format=%s", head)
+	for _, f := range strings.Split(files, "\n") {
+		if f == "" {
+			continue
+		}
+		cmd := exec.Command("git", "--git-dir="+gitDir(repo), "show", head+":"+f)
+		content, err := cmd.Output()
+		if err != nil {
+			continue
+		}
+		dst := filepath.Join(filesDir(repo), fmt.Sprintf("%s.v%d", f, ver))
+		os.MkdirAll(filepath.Dir(dst), 0o755)
+		if err := os.WriteFile(dst, content, 0o644); err != nil {
+			return err
+		}
+		add.Files = append(add.Files, f)
+		add.Bytes += int64(len(content))
+	}
+	if _, err := git(repo, "tag", "-f", "v"+strconv.Itoa(ver), head); err != nil {
+		return err
+	}
+	meta.Latest = ver
+	meta.Adds = append(meta.Adds, add)
+	log.Printf("%s: version %d (%s) %d file(s)", repo, ver, head[:7], len(add.Files))
+	return saveMeta(repo, meta)
+}
+
+// ---------- meta ----------
+
+func loadMeta(repo string) (*Meta, error) {
 	b, err := os.ReadFile(metaPath(repo))
-	if errors.Is(err, os.ErrNotExist) {
-		if !create {
-			return nil, errors.New("repo not found")
-		}
-		if err := os.MkdirAll(filesDir(repo), 0o755); err != nil {
-			return nil, err
-		}
-		return &Meta{Repo: repo, Created: time.Now().UTC(), Adds: []Add{}}, nil
-	}
 	if err != nil {
 		return nil, err
 	}
 	var m Meta
-	return &m, json.Unmarshal(b, &m)
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	if m.Adds == nil {
+		m.Adds = []Add{}
+	}
+	return &m, nil
 }
 
 func saveMeta(repo string, m *Meta) error {
@@ -260,58 +303,9 @@ func saveMeta(repo string, m *Meta) error {
 	return os.Rename(tmp, metaPath(repo))
 }
 
-// snapshot returns name -> path of the newest copy of each file with version <= ver.
-func snapshot(repo string, ver int) (map[string]string, error) {
-	entries, err := os.ReadDir(filesDir(repo))
-	if err != nil {
-		return nil, err
-	}
-	best := map[string]int{}
-	out := map[string]string{}
-	for _, e := range entries {
-		m := suffixRe.FindStringSubmatch(e.Name())
-		if m == nil {
-			continue
-		}
-		v, _ := strconv.Atoi(m[2])
-		if v <= ver && v > best[m[1]] {
-			best[m[1]] = v
-			out[m[1]] = filepath.Join(filesDir(repo), e.Name())
-		}
-	}
-	return out, nil
-}
-
-func parseVersion(s string, latest int) (int, error) {
-	if s == "" || s == "latest" {
-		return latest, nil
-	}
-	v, err := strconv.Atoi(strings.TrimPrefix(s, "v"))
-	if err != nil || v < 1 || v > latest {
-		return 0, fmt.Errorf("invalid version %q (latest is %d)", s, latest)
-	}
-	return v, nil
-}
-
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	enc.Encode(v)
-}
-
-func logRequests(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s", r.Method, r.URL)
-		h.ServeHTTP(w, r)
-	})
 }

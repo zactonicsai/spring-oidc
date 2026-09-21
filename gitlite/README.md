@@ -1,38 +1,34 @@
-# gitlite — a tiny git-like versioned file server in Go
+# gitlite — a tiny GitHub-style git server in Go
 
-No auth, no dependencies beyond the Go standard library.
+Standard `git` is the client. No auth. Stdlib only (needs `git` installed on the server).
 
-## Build
+## Build & run
     go build -o gitlite-server ./server
-    go build -o gitlite ./client
-
-## Run the server
     ./gitlite-server -dir ./repos -port 8080
 
-## Client
-    ./gitlite clone http://localhost:8080/myrepo [dir]   # download latest snapshot
-    ./gitlite add [-m "message"] file1 file2 ...          # upload -> new version
-    ./gitlite pull [-v N]                                 # get version N (default latest)
-    ./gitlite versions                                    # list all versions
+## Use with plain git
+    # push the current directory as a new repo (created automatically on first push)
+    git init && git add . && git commit -m "first"
+    git remote add origin http://localhost:8080/myrepo.git
+    git push origin main
 
-The remote URL is stored in a `.gitlite` file in the working directory.
-Repos are created automatically on first `add`.
+    git clone http://localhost:8080/myrepo.git      # clone
+    git pull                                        # pull latest
+    git tag                                         # v1, v2, v3 ...  (one tag per push)
+    git checkout v2                                 # pull / check out a specific version
 
-## HTTP API (usable with curl too)
-    POST /{repo}/add                       multipart form, field "file" (repeatable), optional "message"
-    GET  /{repo}/clone                     tar of latest snapshot
-    GET  /{repo}/pull?version=N            tar of snapshot at version N
-    GET  /{repo}/versions                  meta.json
-    GET  /{repo}/file/{name}?version=N     one file
-    GET  /                                 list repos
+## Extra endpoints
+    GET /                              list repos
+    GET /{repo}/versions               meta.json: every push with date, commit, author, message, files, bytes
+    GET /{repo}/pull?version=N         tar of the repo at version N (default latest)
 
-    curl -F file=@a.txt -F file=@b.txt -F message=first http://localhost:8080/demo/add
-    curl http://localhost:8080/demo/versions
-    curl "http://localhost:8080/demo/pull?version=1" | tar x
+    curl localhost:8080/myrepo/versions
+    curl "localhost:8080/myrepo/pull?version=2" | tar x
 
 ## Storage layout
-    repos/<repo>/files/<name>.v<N>   copy of each file, suffixed with the version it was added in
-    repos/<repo>/meta.json           every add: version, date, files, byte count, message
+    repos/<repo>.git/                  bare git repo (the real history)
+    repos/<repo>.git/files/<path>.v<N> copy of every file changed in version N
+    repos/<repo>.git/meta.json         stats of all pushes
 
-A snapshot at version N = for each file name, the newest copy with version <= N,
-so versions are cumulative like git commits.
+Each `git push` = one version. Changed files are stored with a `.v<N>` suffix,
+the pushed commit is tagged `v<N>`, and an entry is appended to `meta.json`.
