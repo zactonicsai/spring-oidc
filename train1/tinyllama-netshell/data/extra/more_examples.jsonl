@@ -1,0 +1,5 @@
+{"instruction": "Show the routes for IPv6", "input": "", "output": "#!/bin/bash\nip -6 route show"}
+{"instruction": "Ping 10.0.0.1 ten times", "input": "", "output": "#!/bin/bash\nping -c 10 10.0.0.1"}
+{"instruction": "Set DNS servers with NetworkManager to 9.9.9.9", "input": "", "output": "#!/bin/bash\nsudo nmcli con mod \"Wired connection 1\" ipv4.dns \"9.9.9.9\"\nsudo nmcli con up \"Wired connection 1\""}
+{"instruction": "Show the Wi-Fi signal strength on wlan0", "input": "", "output": "#!/bin/bash\niw dev wlan0 link"}
+{"instruction": "Order a pizza", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}

@@ -1,0 +1,77 @@
+{"instruction": "Show all network interfaces and their IP addresses", "input": "", "output": "#!/bin/bash\nip addr show"}
+{"instruction": "List my network interfaces", "input": "", "output": "#!/bin/bash\nip link show"}
+{"instruction": "What IP addresses does this machine have?", "input": "", "output": "#!/bin/bash\nip -brief addr show"}
+{"instruction": "Show the routing table", "input": "", "output": "#!/bin/bash\nip route show"}
+{"instruction": "Show the default gateway", "input": "", "output": "#!/bin/bash\nip route show default"}
+{"instruction": "Show interface statistics like packets and errors", "input": "", "output": "#!/bin/bash\nip -s link show"}
+{"instruction": "Show the ARP table", "input": "", "output": "#!/bin/bash\nip neigh show"}
+{"instruction": "Show the IPv6 addresses on all interfaces", "input": "", "output": "#!/bin/bash\nip -6 addr show"}
+{"instruction": "Show link speed and duplex for eth0", "input": "", "output": "#!/bin/bash\nsudo ethtool eth0"}
+{"instruction": "Show the current hostname", "input": "", "output": "#!/bin/bash\nhostnamectl"}
+{"instruction": "Bring up interface eth0", "input": "", "output": "#!/bin/bash\nsudo ip link set eth0 up"}
+{"instruction": "Bring down interface eth0", "input": "", "output": "#!/bin/bash\nsudo ip link set eth0 down"}
+{"instruction": "Assign static IP 192.168.1.50/24 to eth0", "input": "", "output": "#!/bin/bash\nsudo ip addr add 192.168.1.50/24 dev eth0\nsudo ip link set eth0 up"}
+{"instruction": "Give eth1 the address 10.0.0.5/24", "input": "", "output": "#!/bin/bash\nsudo ip addr add 10.0.0.5/24 dev eth1\nsudo ip link set eth1 up"}
+{"instruction": "Remove IP 192.168.1.50/24 from eth0", "input": "", "output": "#!/bin/bash\nsudo ip addr del 192.168.1.50/24 dev eth0"}
+{"instruction": "Flush all IP addresses from eth0", "input": "", "output": "#!/bin/bash\nsudo ip addr flush dev eth0"}
+{"instruction": "Set the MTU of eth0 to 9000", "input": "", "output": "#!/bin/bash\nsudo ip link set eth0 mtu 9000"}
+{"instruction": "Change the MAC address of eth0 to 00:11:22:33:44:55", "input": "", "output": "#!/bin/bash\nsudo ip link set eth0 down\nsudo ip link set eth0 address 00:11:22:33:44:55\nsudo ip link set eth0 up"}
+{"instruction": "Create VLAN 10 on eth0", "input": "", "output": "#!/bin/bash\nsudo ip link add link eth0 name eth0.10 type vlan id 10\nsudo ip link set eth0.10 up"}
+{"instruction": "Set the hostname to server01", "input": "", "output": "#!/bin/bash\nsudo hostnamectl set-hostname server01"}
+{"instruction": "Set the default gateway to 192.168.1.1", "input": "", "output": "#!/bin/bash\nsudo ip route add default via 192.168.1.1"}
+{"instruction": "Change the default gateway to 10.0.0.1", "input": "", "output": "#!/bin/bash\nsudo ip route replace default via 10.0.0.1"}
+{"instruction": "Add a route to 10.0.0.0/8 via 192.168.1.254", "input": "", "output": "#!/bin/bash\nsudo ip route add 10.0.0.0/8 via 192.168.1.254"}
+{"instruction": "Delete the route to 10.0.0.0/8", "input": "", "output": "#!/bin/bash\nsudo ip route del 10.0.0.0/8"}
+{"instruction": "Enable IP forwarding", "input": "", "output": "#!/bin/bash\nsudo sysctl -w net.ipv4.ip_forward=1"}
+{"instruction": "Set DNS servers to 1.1.1.1 and 8.8.8.8", "input": "", "output": "#!/bin/bash\nsudo resolvectl dns eth0 1.1.1.1 8.8.8.8"}
+{"instruction": "Check which DNS server the system is using", "input": "", "output": "#!/bin/bash\nresolvectl status"}
+{"instruction": "Look up the DNS A record for example.com", "input": "", "output": "#!/bin/bash\ndig example.com A +short"}
+{"instruction": "Find the mail servers for example.com", "input": "", "output": "#!/bin/bash\ndig example.com MX +short"}
+{"instruction": "Do a reverse DNS lookup for 8.8.8.8", "input": "", "output": "#!/bin/bash\ndig -x 8.8.8.8 +short"}
+{"instruction": "List all NetworkManager connections", "input": "", "output": "#!/bin/bash\nnmcli con show"}
+{"instruction": "Show NetworkManager device status", "input": "", "output": "#!/bin/bash\nnmcli dev status"}
+{"instruction": "Configure eth0 with a static IP using NetworkManager", "input": "", "output": "#!/bin/bash\nsudo nmcli con mod \"Wired connection 1\" ipv4.addresses 192.168.1.50/24\nsudo nmcli con mod \"Wired connection 1\" ipv4.gateway 192.168.1.1\nsudo nmcli con mod \"Wired connection 1\" ipv4.dns \"1.1.1.1 8.8.8.8\"\nsudo nmcli con mod \"Wired connection 1\" ipv4.method manual\nsudo nmcli con up \"Wired connection 1\""}
+{"instruction": "Switch eth0 back to DHCP with NetworkManager", "input": "", "output": "#!/bin/bash\nsudo nmcli con mod \"Wired connection 1\" ipv4.method auto\nsudo nmcli con up \"Wired connection 1\""}
+{"instruction": "Show Wi-Fi networks in range", "input": "", "output": "#!/bin/bash\nnmcli dev wifi list"}
+{"instruction": "Connect to Wi-Fi network HomeNet with password secret123", "input": "", "output": "#!/bin/bash\nsudo nmcli dev wifi connect \"HomeNet\" password \"secret123\""}
+{"instruction": "Disconnect the Wi-Fi", "input": "", "output": "#!/bin/bash\nsudo nmcli radio wifi off"}
+{"instruction": "Turn the Wi-Fi back on", "input": "", "output": "#!/bin/bash\nsudo nmcli radio wifi on"}
+{"instruction": "Restart NetworkManager", "input": "", "output": "#!/bin/bash\nsudo systemctl restart NetworkManager"}
+{"instruction": "Show all listening TCP and UDP ports", "input": "", "output": "#!/bin/bash\nss -tulnp"}
+{"instruction": "Show all established TCP connections", "input": "", "output": "#!/bin/bash\nss -tnp state established"}
+{"instruction": "Which process is using port 8080?", "input": "", "output": "#!/bin/bash\nsudo ss -tulnp | grep \":8080\""}
+{"instruction": "Check if google.com is reachable", "input": "", "output": "#!/bin/bash\nping -c 4 google.com"}
+{"instruction": "Trace the route to 8.8.8.8", "input": "", "output": "#!/bin/bash\ntraceroute 8.8.8.8"}
+{"instruction": "Run a continuous traceroute to 1.1.1.1", "input": "", "output": "#!/bin/bash\nmtr -rw 1.1.1.1"}
+{"instruction": "Capture 100 packets on eth0 and save to a file", "input": "", "output": "#!/bin/bash\nsudo tcpdump -i eth0 -c 100 -w capture.pcap"}
+{"instruction": "Capture only HTTP traffic on eth0", "input": "", "output": "#!/bin/bash\nsudo tcpdump -i eth0 port 80"}
+{"instruction": "Capture DNS traffic on wlan0", "input": "", "output": "#!/bin/bash\nsudo tcpdump -i wlan0 port 53"}
+{"instruction": "Show live bandwidth usage on eth0", "input": "", "output": "#!/bin/bash\nsudo iftop -i eth0"}
+{"instruction": "Show network usage per process", "input": "", "output": "#!/bin/bash\nsudo nethogs eth0"}
+{"instruction": "Monitor network connections every 2 seconds", "input": "", "output": "#!/bin/bash\nwatch -n 2 ss -tunap"}
+{"instruction": "Test if port 443 is open on example.com", "input": "", "output": "#!/bin/bash\nnc -zv example.com 443"}
+{"instruction": "Scan open ports on 192.168.1.10", "input": "", "output": "#!/bin/bash\nnmap -sT 192.168.1.10"}
+{"instruction": "Find all devices on the 192.168.1.0/24 network", "input": "", "output": "#!/bin/bash\nnmap -sn 192.168.1.0/24"}
+{"instruction": "Show my public IP address", "input": "", "output": "#!/bin/bash\ncurl -s https://ifconfig.me\necho"}
+{"instruction": "Measure bandwidth to the iperf server 192.168.1.20", "input": "", "output": "#!/bin/bash\niperf3 -c 192.168.1.20"}
+{"instruction": "List all nftables rules", "input": "", "output": "#!/bin/bash\nsudo nft list ruleset"}
+{"instruction": "Allow incoming SSH with nftables", "input": "", "output": "#!/bin/bash\nsudo nft add rule inet filter input tcp dport 22 accept"}
+{"instruction": "Block all traffic from 203.0.113.5 with nftables", "input": "", "output": "#!/bin/bash\nsudo nft add rule inet filter input ip saddr 203.0.113.5 drop"}
+{"instruction": "Create a script that checks internet connectivity and logs the result", "input": "", "output": "#!/bin/bash\nLOG=/var/log/netcheck.log\nif ping -c 1 -W 2 1.1.1.1 > /dev/null 2>&1; then\n  echo \"$(date) UP\" >> \"$LOG\"\nelse\n  echo \"$(date) DOWN\" >> \"$LOG\"\nfi"}
+{"instruction": "Create a script that backs up the current IP configuration", "input": "", "output": "#!/bin/bash\nOUT=/root/net-backup-$(date +%F).txt\nip addr show > \"$OUT\"\nip route show >> \"$OUT\"\nresolvectl status >> \"$OUT\""}
+{"instruction": "Write a script that restarts eth0", "input": "", "output": "#!/bin/bash\nsudo ip link set eth0 down\nsleep 2\nsudo ip link set eth0 up"}
+{"instruction": "Write a poem about the ocean", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "How do I bake bread?", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "What is the meaning of life?", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Tell me a joke about routers", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Translate the word network into Spanish", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Configure the network on Windows with netsh", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Configure VLAN 10 on the Cisco switch", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Set up the firewall on macOS with pf", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Log in to my router's web admin page and change the password", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Fix my network", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Make the Wi-Fi faster", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Configure it", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Set the IP address of the printer", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Configure BGP peering with AS 65001", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}
+{"instruction": "Install Photoshop on my laptop", "input": "", "output": "#!/bin/bash\necho \"I don't know\""}

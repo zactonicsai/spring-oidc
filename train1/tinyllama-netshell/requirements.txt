@@ -1,0 +1,8 @@
+# Python-only path (CPU / Apple Silicon). Tested layout: Python 3.10 - 3.13
+torch>=2.4
+transformers>=4.56
+peft>=0.14
+datasets>=3.0
+accelerate>=1.0
+sentencepiece
+protobuf

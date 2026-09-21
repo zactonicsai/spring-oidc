@@ -1,0 +1,7 @@
+.venv/
+outputs/
+models/*/
+__pycache__/
+data/train.jsonl
+data/train_chatml.jsonl
+*.gguf

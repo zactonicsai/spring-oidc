@@ -1,0 +1,18 @@
+# Test questions. These are NOT in the training deck on purpose (a real quiz, not the practice sheet).
+# Lines starting with # are ignored.
+
+# should answer with commands
+Give eth1 the static IP 10.10.0.20/24 and make the gateway 10.10.0.1
+Show me which ports are listening
+Ping 8.8.8.8 five times
+Capture 50 packets on wlan0 into wifi.pcap
+Add a route to 172.16.0.0/12 through 192.168.1.1
+Turn interface eth2 off
+List the Wi-Fi networks nearby
+Look up the IP address of github.com
+
+# should say: I don't know
+Write me a haiku about summer
+Configure the VPN on my iPhone
+Set up port forwarding on my Netgear router's web page
+Make my computer faster
