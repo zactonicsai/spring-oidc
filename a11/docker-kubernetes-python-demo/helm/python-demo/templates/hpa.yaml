@@ -1,0 +1,33 @@
+{{- $root := . -}}
+{{- range $svcName, $svc := .Values.services }}
+{{- $auto := default dict $svc.autoscale }}
+{{- if $auto.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "app.svcname" (list $root $svcName) }}
+  namespace: {{ $root.Values.namespace }}
+  labels:
+    {{- include "app.labels" (list $root $svcName) | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "app.svcname" (list $root $svcName) }}
+  minReplicas: {{ default 1 $auto.minReplicas }}
+  maxReplicas: {{ default 3 $auto.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ default 70 $auto.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+    scaleDown:
+      stabilizationWindowSeconds: 60
+{{- end }}
+{{- end }}

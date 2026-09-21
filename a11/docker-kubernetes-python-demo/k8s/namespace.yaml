@@ -1,0 +1,7 @@
+# A Namespace = one department in the store. Everything for this app lives here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: python-demo
+  labels:
+    app.kubernetes.io/part-of: python-demo

@@ -1,0 +1,72 @@
+# Default values. In practice these are OVERRIDDEN by build/helm-values.yaml,
+# which tools/appconfig.py renders from app.config.yaml (the single source of truth).
+# Keep this file a working example so `helm install` with no -f still deploys something.
+
+nameOverride: python-demo        # prefix for every resource name: <nameOverride>-<service>
+namespace: python-demo           # created by `helm --create-namespace`
+version: "1.0.0"                 # default image tag
+
+global:
+  imageRegistry: ""              # "" = local image; "myacr.azurecr.io" on Azure
+  imagePullSecret: ""
+  labels: {}
+
+# How "expose: public" ports are published:
+#   ClusterIP    -> use kubectl port-forward (kind, laptops)
+#   LoadBalancer -> cloud gives you a public IP (AKS)
+#   NodePort     -> port on every node
+publicServiceType: ClusterIP
+# Restrict WHO may reach a LoadBalancer/NodePort service (cloud firewall), e.g. ["203.0.113.4/32"]
+publicServiceSourceRanges: []
+
+networkPolicy:
+  enabled: true
+  defaultDeny: true
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+
+podSecurity:
+  runAsUser: 65532
+  runAsGroup: 65532
+
+services:
+  web:
+    image: { repository: python-demo-web, tag: "", pullPolicy: IfNotPresent }
+    ports:
+      - { name: http, containerPort: 8080, servicePort: 80, protocol: TCP, expose: public }
+    config:
+      GREETING: "Welcome to the Grocery Store"
+      API_URL: "http://python-demo-api"
+      LOG_LEVEL: info
+    secretKeys: []
+    health: { path: /health, readinessInitialDelaySeconds: 2, livenessInitialDelaySeconds: 5 }
+    replicas: 2
+    autoscale: { enabled: true, minReplicas: 2, maxReplicas: 5, targetCPUUtilizationPercentage: 60 }
+    resources:
+      requests: { cpu: 25m, memory: 32Mi }
+      limits: { cpu: 250m, memory: 128Mi }
+    allowFrom: []
+  api:
+    image: { repository: python-demo-api, tag: "", pullPolicy: IfNotPresent }
+    ports:
+      - { name: http, containerPort: 8080, servicePort: 80, protocol: TCP, expose: cluster }
+    config:
+      GREETING: "Hello from the stock room"
+      LOG_LEVEL: info
+    secretKeys: [API_TOKEN]
+    health: { path: /health, readinessInitialDelaySeconds: 2, livenessInitialDelaySeconds: 5 }
+    replicas: 1
+    autoscale: { enabled: true, minReplicas: 1, maxReplicas: 4, targetCPUUtilizationPercentage: 70 }
+    resources:
+      requests: { cpu: 25m, memory: 32Mi }
+      limits: { cpu: 250m, memory: 128Mi }
+    allowFrom: [web]
+
+# Secret VALUES: supplied at deploy time, never committed.
+#   tools/appconfig.py render secrets   -> build/secrets-values.yaml   (from secrets.env)
+#   helm ... -f build/secrets-values.yaml
+# Shape:  secrets: { api: { API_TOKEN: "..." } }
+secrets: {}

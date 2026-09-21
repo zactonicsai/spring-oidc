@@ -1,0 +1,35 @@
+---
+# Configure base Linux hosts from app.config.yaml — the Ansible equivalent of setup/setup.sh + configure.sh.
+#   ansible-playbook -i inventory/azure.ini site.yml -e image_registry=myacr.azurecr.io
+- name: Configure base Linux hosts from app.config.yaml
+  hosts: app_hosts
+  become: true
+  gather_facts: true
+  vars:
+    app_config_path: "{{ playbook_dir }}/../app.config.yaml"
+    image_registry: ""                       # -e image_registry=<acr>.azurecr.io ; "" = local images
+    secrets_env_path: "{{ playbook_dir }}/../secrets.env"
+  pre_tasks:
+    - name: Load app.config.yaml (the single source of truth)
+      ansible.builtin.include_vars:
+        file: "{{ app_config_path }}"
+        name: appcfg
+
+    - name: Derive facts from the config
+      ansible.builtin.set_fact:
+        app_name: "{{ appcfg.metadata.name }}"
+        app_version: "{{ appcfg.metadata.version }}"
+        registry: "{{ image_registry if image_registry else (appcfg.sources.imageRegistry | default('')) }}"
+        hostcfg: "{{ appcfg.hosts | default({}) }}"
+        in_container: >-
+          {{ ansible_facts.virtualization_type | default('') in ['docker', 'container', 'containerd', 'podman']
+             and ansible_facts.virtualization_role | default('') == 'guest' }}
+
+    - name: Load secrets.env from the controller if it exists (never committed)
+      ansible.builtin.set_fact:
+        service_secrets: >-
+          {{ lookup('ansible.builtin.file', secrets_env_path, errors='ignore') | default('', true)
+             | split('\n') | map('trim') | reject('match', '^#') | select('search', '=')
+             | map('split', '=', 1) | community.general.dict }}
+  roles:
+    - base-linux

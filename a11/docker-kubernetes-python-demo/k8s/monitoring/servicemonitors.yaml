@@ -1,0 +1,30 @@
+# Tell the Prometheus Operator what to scrape beyond the cluster itself.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: keycloak
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: keycloak }
+spec:
+  namespaceSelector: { matchNames: ["keycloak"] }
+  selector:
+    matchLabels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }
+  endpoints:
+    - port: management               # 9000: /metrics (JVM, HTTP, DB pool, cache, user events)
+      path: /metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: python-demo
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: python-demo }
+spec:
+  namespaceSelector: { matchNames: ["python-demo"] }
+  selector:
+    matchLabels: { app.kubernetes.io/name: python-demo }     # both web and api Services
+  endpoints:
+    - port: http                     # /metrics on the app port (prometheus-flask-exporter)
+      path: /metrics
+      interval: 30s

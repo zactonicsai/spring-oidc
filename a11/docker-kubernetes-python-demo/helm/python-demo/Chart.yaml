@@ -1,0 +1,10 @@
+apiVersion: v2
+name: python-demo
+description: Schema-driven chart - every service in app.config.yaml becomes Deployment + Service + ConfigMap (+ Secret, HPA, NetworkPolicy)
+type: application
+version: 0.2.0
+appVersion: "1.0.0"
+kubeVersion: ">=1.29.0-0"
+keywords: [python, flask, demo, template]
+maintainers:
+  - name: platform-team

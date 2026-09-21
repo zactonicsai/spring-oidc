@@ -1,0 +1,54 @@
+# The shared database — required for more than one Keycloak replica.
+# (Two replicas with the embedded dev database would each keep their own users.)
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-db
+  namespace: keycloak
+  labels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: db }
+spec:
+  clusterIP: None                     # headless: pods connect to keycloak-db-0 directly
+  selector: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: db }
+  ports: [{ name: postgres, port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: keycloak-db
+  namespace: keycloak
+  labels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: db }
+spec:
+  serviceName: keycloak-db
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: db }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: db }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 999, runAsGroup: 999, fsGroup: 999, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: postgres
+          image: postgres:17-alpine
+          ports: [{ name: postgres, containerPort: 5432 }]
+          env:
+            - { name: POSTGRES_DB,       valueFrom: { secretKeyRef: { name: keycloak-db, key: database } } }
+            - { name: POSTGRES_USER,     valueFrom: { secretKeyRef: { name: keycloak-db, key: username } } }
+            - { name: POSTGRES_PASSWORD, valueFrom: { secretKeyRef: { name: keycloak-db, key: password } } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          readinessProbe:
+            exec: { command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"] }
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["sh", "-c", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"] }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits:   { cpu: 500m, memory: 512Mi }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } }
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 2Gi } }

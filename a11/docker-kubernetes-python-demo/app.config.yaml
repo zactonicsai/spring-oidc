@@ -1,0 +1,198 @@
+# =============================================================================
+# app.config.yaml  —  THE single source of truth for this project.
+#
+# Everything else is generated from, or reads, this file:
+#   * tools/appconfig.py render   -> build/helm-values.yaml, build/config.env,
+#                                     build/host-config.env, build/docker-compose.yaml
+#   * helm/python-demo            -> reads the rendered helm values
+#   * scripts/*.sh, scripts/azure -> read build/config.env
+#   * terraform/*                 -> yamldecode(file("app.config.yaml"))
+#   * ansible/site.yml            -> include_vars this file
+#   * setup/setup.sh + configure.sh -> read build/host-config.env
+#
+# Validate it any time with:   make validate      (schema/app-config.schema.json)
+#
+# Placeholders you may use inside string values:
+#   ${name}      -> metadata.name          ${version}  -> metadata.version
+#   ${registry}  -> sources.imageRegistry  (empty string when building locally)
+# =============================================================================
+apiVersion: appconfig.demo/v1
+kind: AppConfig
+
+metadata:
+  name: python-demo            # <-- CHANGE ME when using this repo as a template
+  version: "1.0.0"             # default image tag for every service
+  description: "Python web + API demo on Docker, kind, AKS, Terraform and Ansible"
+  owner: "platform-team"
+  labels:
+    environment: dev
+    tier: learning
+
+# -----------------------------------------------------------------------------
+# WHERE things are pulled FROM (images + files)
+# -----------------------------------------------------------------------------
+sources:
+  # Container registry that image names are prefixed with.
+  #   ""                        -> plain local images (kind / docker)
+  #   "myregistry.azurecr.io"   -> Azure Container Registry (scripts/azure fill this in)
+  imageRegistry: ""
+  # Name of a Kubernetes imagePullSecret if the registry needs a password ("" = none / AKS-ACR integration)
+  imagePullSecret: ""
+  # External files to download while configuring a base Linux host (VM or docker "host" container).
+  # Each entry is fetched by setup/configure.sh (bash) AND by ansible/roles/base-linux (Ansible),
+  # so the same list works for both configuration methods.
+  files:
+    - name: motd
+      url: https://raw.githubusercontent.com/kubernetes/kubernetes/master/CONTRIBUTING.md
+      dest: /etc/${name}/downloaded/motd.md
+      mode: "0644"
+      sha256: ""               # optional: put a checksum here to verify the download
+    - name: kube-schema-readme
+      url: https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/README.md
+      dest: /etc/${name}/downloaded/kube-schema-readme.md
+      mode: "0644"
+      sha256: ""
+
+# -----------------------------------------------------------------------------
+# WHAT runs in Kubernetes (or docker) — one entry per container service
+# -----------------------------------------------------------------------------
+services:
+  - name: web
+    description: "Flask page that calls the API through the cluster network"
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+    image:
+      repository: ${name}-web          # final image = <registry>/<repository>:<tag>
+      tag: ""                          # "" -> metadata.version
+      pullPolicy: IfNotPresent
+    ports:
+      - name: http
+        containerPort: 8080            # the port the process listens on inside the container
+        servicePort: 80                # the port the Kubernetes Service (and docker host) exposes
+        protocol: TCP
+        expose: public                 # none | cluster | public
+    config:                            # non-secret settings -> ConfigMap -> env vars
+      GREETING: "Welcome to the Grocery Store"
+      API_URL: "http://${name}-api"    # in-cluster DNS name of the api Service
+      LOG_LEVEL: info
+    secrets: []                        # web needs no secrets
+    health:
+      path: /health
+      readinessInitialDelaySeconds: 2
+      livenessInitialDelaySeconds: 5
+    scale:
+      replicas: 2
+      autoscale:
+        enabled: true
+        minReplicas: 2
+        maxReplicas: 5
+        targetCPUUtilizationPercentage: 60
+    resources:
+      requests: { cpu: 25m, memory: 32Mi }
+      limits:   { cpu: 250m, memory: 128Mi }
+    network:
+      allowFrom: []                    # other services allowed to call this one ("public" already lets outside traffic in)
+
+  - name: api
+    description: "Flask JSON API — only reachable from the web service"
+    build:
+      context: apps/api
+      dockerfile: Dockerfile
+    image:
+      repository: ${name}-api
+      tag: ""
+      pullPolicy: IfNotPresent
+    ports:
+      - name: http
+        containerPort: 8080
+        servicePort: 80
+        protocol: TCP
+        expose: cluster                # reachable inside the cluster only
+    config:
+      GREETING: "Hello from the stock room"
+      LOG_LEVEL: info
+    secrets:                           # names of secret KEYS this service needs.
+      - name: API_TOKEN                # VALUES never live in this file: see secrets.env.example / Key Vault
+        description: "Token the API prints (masked) to prove secrets are injected"
+    health:
+      path: /health
+      readinessInitialDelaySeconds: 2
+      livenessInitialDelaySeconds: 5
+    scale:
+      replicas: 1
+      autoscale:
+        enabled: true
+        minReplicas: 1
+        maxReplicas: 4
+        targetCPUUtilizationPercentage: 70
+    resources:
+      requests: { cpu: 25m, memory: 32Mi }
+      limits:   { cpu: 250m, memory: 128Mi }
+    network:
+      allowFrom: [web]                 # ONLY web may talk to api
+
+# -----------------------------------------------------------------------------
+# Kubernetes-wide settings
+# -----------------------------------------------------------------------------
+kubernetes:
+  namespace: ""                        # "" -> metadata.name
+  networkPolicy:
+    enabled: true                      # generate NetworkPolicy objects from services[].network
+    defaultDeny: true                  # start from "nobody talks to anybody" then allow explicitly
+  ingress:
+    enabled: false                     # set true + host on AKS if you install an ingress controller
+    className: ""
+    host: ""
+
+# -----------------------------------------------------------------------------
+# Base Linux HOST configuration (Azure VM or a local docker "host" container).
+# Used by setup/setup.sh, setup/configure.sh, cloud-init, and ansible/.
+# -----------------------------------------------------------------------------
+hosts:
+  baseImage:
+    docker: "ubuntu:24.04"             # used by terraform/local-docker
+    azure:                             # used by terraform/azure and scripts/azure/10-create-vm.sh
+      publisher: Canonical
+      offer: ubuntu-24_04-lts
+      sku: server
+      version: latest
+      urnAlias: Ubuntu2404             # `az vm create --image Ubuntu2404`
+  adminUser: azureuser
+  packages: [curl, ca-certificates, git, jq, ufw, unzip, python3]
+  exposePorts:                         # host firewall (ufw) + Azure NSG rules
+    - { name: ssh,  port: 22, protocol: TCP, source: "*" }   # tip: replace "*" with YOUR_IP/32
+    - { name: http, port: 80, protocol: TCP, source: "*" }
+  setupScript: setup/setup.sh          # runs first: packages, docker engine, firewall, users
+  configureScript: setup/configure.sh  # runs second: downloads sources.files, writes settings, runs the app
+  ansible:
+    enabled: true
+    playbook: ansible/site.yml
+  settings:                            # host-level settings -> /etc/<name>/config.env
+    TIMEZONE: "America/Chicago"
+    LOG_LEVEL: info
+    RUN_DEMO_CONTAINERS: "true"        # configure.sh starts the web+api containers with docker on the host
+
+# -----------------------------------------------------------------------------
+# Deployment targets (where it runs). App settings above stay the same everywhere.
+# -----------------------------------------------------------------------------
+targets:
+  local:
+    clusterName: ${name}               # kind cluster name
+    kindConfig: kind-config.yaml
+  azure:
+    location: eastus
+    resourceGroup: ""                  # "" -> rg-<name>
+    acrName: ""                        # "" -> derived (letters+numbers only, globally unique)
+    aks:
+      nodeCount: 2
+      nodeVmSize: Standard_B2ms
+      autoscale: { enabled: true, minCount: 1, maxCount: 3 }
+      tier: free                       # free | standard
+      kubernetesVersion: ""            # "" -> AKS default GA version (list: az aks get-versions)
+      networkPolicy: cilium            # cilium (recommended) | azure | calico
+    vm:
+      enabled: true
+      size: Standard_B1s
+    keyVault:
+      enabled: true

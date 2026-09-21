@@ -1,0 +1,7 @@
+# Extra overrides for kind / Docker Desktop
+prometheus-node-exporter:
+  hostRootFsMount: { enabled: false }            # /root mount is not allowed on Docker Desktop
+prometheus:
+  prometheusSpec:
+    retention: 2d
+    resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 1Gi } }

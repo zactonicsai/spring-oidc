@@ -1,0 +1,25 @@
+---
+- name: Directories for downloaded files
+  ansible.builtin.file:
+    path: "{{ (item.dest | replace('${name}', app_name)) | dirname }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ appcfg.sources.files | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Download sources.files (checksum verified when sha256 is given)
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ item.dest | replace('${name}', app_name) }}"
+    mode: "{{ item.mode | default('0644') }}"
+    owner: "{{ item.owner | default('root') }}"
+    checksum: "{{ ('sha256:' ~ item.sha256) if (item.sha256 | default('')) else omit }}"
+    timeout: 60
+  loop: "{{ appcfg.sources.files | default([]) }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.dest | replace('${name}', app_name) }}"
+  register: downloads
+  retries: 3
+  delay: 5
+  until: downloads is succeeded

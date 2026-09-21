@@ -1,0 +1,26 @@
+# HorizontalPodAutoscaler = the store manager who opens more checkout lanes when lines get long.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: python-demo-web
+  namespace: python-demo
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: python-demo-web }
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 60 } }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: python-demo-api
+  namespace: python-demo
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: python-demo-api }
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } }

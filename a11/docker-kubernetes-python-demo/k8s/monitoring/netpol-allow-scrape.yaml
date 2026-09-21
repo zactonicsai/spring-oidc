@@ -1,0 +1,12 @@
+# The app namespace is default-deny: let Prometheus (namespace "monitoring") reach the metrics ports.
+# (The keycloak namespace policy already allows monitoring -> 9000.)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: allow-prometheus-scrape, namespace: python-demo }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: python-demo } }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } }
+      ports: [{ port: 8080 }]

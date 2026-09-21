@@ -1,0 +1,144 @@
+{
+  "realm": "${realm}",
+  "enabled": true,
+  "displayName": "Demo OIDC Realm",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      { "name": "user", "description": "Standard application user" },
+      { "name": "admin", "description": "Application administrator" },
+      { "name": "developer", "description": "Developer workspace role" }
+    ]
+  },
+  "defaultRoles": ["user"],
+  "users": [
+    {
+      "username": "developer",
+      "enabled": true,
+      "email": "developer@example.com",
+      "emailVerified": true,
+      "firstName": "Dev",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${demo_user_password}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["user", "developer"]
+    },
+    {
+      "username": "adminuser",
+      "enabled": true,
+      "email": "admin@example.com",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "${demo_user_password}",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["user", "admin"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "${java_client_id}",
+      "name": "Java OIDC example",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${java_client_secret}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "redirectUris": [
+        "*",
+        "http://localhost:*",
+        "http://${public_host}/*",
+        "http://java.${public_host}/*"
+      ],
+      "webOrigins": ["*"],
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+      "optionalClientScopes": ["address", "phone", "offline_access", "microprofile-jwt"],
+      "attributes": {
+        "post.logout.redirect.uris": "+",
+        "pkce.code.challenge.method": "S256"
+      }
+    },
+    {
+      "clientId": "${golang_client_id}",
+      "name": "Golang OIDC example",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${golang_client_secret}",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [
+        "*",
+        "http://localhost:*",
+        "http://${public_host}/*",
+        "http://go.${public_host}/*"
+      ],
+      "webOrigins": ["*"],
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+      "optionalClientScopes": ["address", "phone", "offline_access", "microprofile-jwt"],
+      "attributes": {
+        "post.logout.redirect.uris": "+",
+        "pkce.code.challenge.method": "S256"
+      }
+    },
+    {
+      "clientId": "${public_client_id}",
+      "name": "Public browser / SPA client",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "redirectUris": ["*"],
+      "webOrigins": ["*"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "+"
+      }
+    },
+    {
+      "clientId": "${service_client_id}",
+      "name": "Service-to-service client credentials",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${service_client_secret}",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "redirectUris": [],
+      "webOrigins": []
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "microprofile-jwt",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    }
+  ]
+}

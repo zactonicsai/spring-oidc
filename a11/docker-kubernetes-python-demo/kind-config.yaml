@@ -1,0 +1,11 @@
+# kind = Kubernetes IN Docker: every "node" below is a Docker container on your laptop.
+# kind >= 0.24 enforces NetworkPolicy out of the box (kube-network-policies).
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane   # the "store manager's office": API server, scheduler, etcd
+  - role: worker          # the "shop floor": where your pods actually run
+    # Uncomment to reach NodePort 30080 (scripts/keycloak.sh) at http://localhost:30080 without port-forward:
+    # extraPortMappings:
+    #   - { containerPort: 30080, hostPort: 30080, protocol: TCP }
+# Pin a Kubernetes version by adding to each node:  image: kindest/node:v1.34.0@sha256:...

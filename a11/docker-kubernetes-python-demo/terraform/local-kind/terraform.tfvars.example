@@ -1,0 +1,4 @@
+# cp terraform.tfvars.example terraform.tfvars
+install_metrics_server = true
+# node_image = "kindest/node:v1.34.0"        # pin a Kubernetes version (see https://github.com/kubernetes-sigs/kind/releases)
+# export TF_VAR_secrets='{"API_TOKEN":"local-dev-token"}'

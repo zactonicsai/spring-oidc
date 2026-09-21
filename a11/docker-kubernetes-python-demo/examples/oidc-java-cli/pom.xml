@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>demo</groupId>
+  <artifactId>oidc-cli</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <name>oidc-cli — Keycloak device-flow login with group-based access control</name>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>   <!-- runs on Temurin 21 or 25 -->
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <nimbus.version>10.5</nimbus.version>
+  </properties>
+
+  <dependencies>
+    <!-- JWT parsing + signature verification against the issuer's JWKS. The only dependency. -->
+    <dependency>
+      <groupId>com.nimbusds</groupId>
+      <artifactId>nimbus-jose-jwt</artifactId>
+      <version>${nimbus.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>oidc-cli</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>demo.OidcCli</mainClass>
+                </transformer>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

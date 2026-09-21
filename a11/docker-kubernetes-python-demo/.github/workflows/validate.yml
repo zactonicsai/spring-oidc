@@ -1,0 +1,43 @@
+name: validate
+on:
+  push:
+  pull_request:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r tools/requirements.txt ansible-lint
+      - name: Validate app.config.yaml against the schema
+        run: python3 tools/appconfig.py validate && python3 tools/appconfig.py render all
+      - name: shellcheck
+        run: |
+          sudo apt-get install -y shellcheck
+          shellcheck -x -S warning scripts/*.sh scripts/lib/*.sh scripts/azure/*.sh setup/*.sh images/devbox/entrypoint.sh
+      - name: Helm 4 lint + render + kubeconform
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 | bash
+          helm lint helm/python-demo -f build/helm-values.yaml
+          curl -fsSL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | sudo tar -xz -C /usr/local/bin kubeconform
+          helm template python-demo helm/python-demo -f build/helm-values.yaml | kubeconform -strict -summary
+          kubeconform -strict -summary k8s/*.yaml k8s/keycloak/*.yaml k8s/devbox/*.yaml
+          kubeconform -strict -summary -schema-location default -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' k8s/monitoring/servicemonitors.yaml k8s/monitoring/rules.yaml k8s/monitoring/netpol-allow-scrape.yaml k8s/monitoring/dashboard-configmap.yaml
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.27" }
+      - name: Go OIDC client builds
+        run: cd examples/oidc-go-cli && go mod tidy && go vet ./... && go build .
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "25" }
+      - name: Java OIDC client builds
+        run: cd examples/oidc-java-cli && mvn -q -B package
+      - name: ansible-lint
+        run: cd ansible && ansible-lint --offline site.yml
+      - uses: hashicorp/setup-terraform@v3
+      - name: terraform fmt + validate
+        run: |
+          terraform fmt -check -recursive terraform
+          for d in terraform/local-docker terraform/local-kind terraform/azure; do
+            (cd "$d" && terraform init -backend=false -input=false && terraform validate)
+          done

@@ -1,0 +1,29 @@
+name_prefix = "kcaks"
+location    = "eastus2"
+
+# Leave null to let AKS pick a supported version.
+kubernetes_version = null
+
+node_count   = 3
+node_vm_size = "Standard_D2s_v5"
+
+enable_ingress = true
+# Optional custom DNS pointed at the ingress LoadBalancer IP.
+ingress_host = ""
+
+# After building the workstation image:
+#   az acr build -r $(terraform output -raw acr_name) -t devbox:27 -f apps/devbox/Dockerfile apps/devbox
+# set this to "<login_server>/devbox:27"
+devbox_image = "ubuntu:24.04"
+
+devbox_ssh_authorized_keys = [
+  # "ssh-ed25519 AAAA... you@laptop"
+]
+
+devbox_service_type = "ClusterIP"
+
+tags = {
+  project    = "aks-keycloak-oidc"
+  managed-by = "terraform"
+  owner      = "platform"
+}

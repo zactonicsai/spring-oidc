@@ -1,0 +1,25 @@
+# generated
+build/
+terraform/*/generated/
+ansible/inventory/*.ini
+!ansible/inventory/example.ini
+# secrets / local overrides
+secrets.env
+.env
+*.auto.tfvars
+terraform.tfvars
+# terraform state + providers
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+# python
+__pycache__/
+*.pyc
+.venv/
+# os / editors
+.DS_Store
+.idea/
+.vscode/
+*.log

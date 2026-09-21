@@ -1,0 +1,125 @@
+# Keycloak 26.7 — production mode ("start"), 2+ replicas clustered over Kubernetes DNS (JGroups DNS_PING).
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-headless            # used by the cache cluster to find the other replicas (port 7800)
+  namespace: keycloak
+  labels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }
+  ports:
+    - { name: jgroups,    port: 7800, targetPort: 7800 }
+    - { name: management, port: 9000, targetPort: 9000 }   # /metrics + /health for Prometheus (internal only; NOT on the public Service)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak                     # THE exposed port: 80 -> container 8080
+  namespace: keycloak
+  labels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }
+spec:
+  type: ClusterIP                    # scripts/keycloak.sh switches this to LoadBalancer (AKS) or NodePort (kind)
+  selector: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: keycloak
+  labels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }
+spec:
+  replicas: 2                        # minimum; the HPA below may raise it up to 4
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }     # never drop below 2 during an update
+  selector:
+    matchLabels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }
+    spec:
+      # spread the replicas over different nodes when possible
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.7
+          args: ["start", "--import-realm"]   # production mode; imports /opt/keycloak/data/import/*.json on first start
+          env:
+            # --- admin bootstrap (first start only) ---
+            - { name: KC_BOOTSTRAP_ADMIN_USERNAME, valueFrom: { secretKeyRef: { name: keycloak-admin, key: username } } }
+            - { name: KC_BOOTSTRAP_ADMIN_PASSWORD, valueFrom: { secretKeyRef: { name: keycloak-admin, key: password } } }
+            # --- database ---
+            - { name: KC_DB, value: postgres }
+            - { name: KC_DB_URL, value: jdbc:postgresql://keycloak-db-0.keycloak-db:5432/keycloak }
+            - { name: KC_DB_USERNAME, valueFrom: { secretKeyRef: { name: keycloak-db, key: username } } }
+            - { name: KC_DB_PASSWORD, valueFrom: { secretKeyRef: { name: keycloak-db, key: password } } }
+            # --- http behind a load balancer / port-forward (TLS terminated outside) ---
+            - { name: KC_HTTP_ENABLED, value: "true" }
+            - { name: KC_HOSTNAME_STRICT, value: "false" }
+            - { name: KC_PROXY_HEADERS, value: xforwarded }
+            # --- health + metrics on the management port 9000 ---
+            - { name: KC_HEALTH_ENABLED, value: "true" }
+            - { name: KC_METRICS_ENABLED, value: "true" }
+            - { name: KC_HTTP_METRICS_HISTOGRAMS_ENABLED, value: "true" }      # p95 latency needs buckets
+            - { name: KC_EVENT_METRICS_USER_ENABLED, value: "true" }           # keycloak_user_events_total{event=login|login_error|...}
+            - { name: KC_EVENT_METRICS_USER_TAGS, value: "realm,clientId" }
+            # --- clustering: replicas discover each other through the headless service ---
+            - { name: KC_CACHE, value: ispn }
+            - { name: KC_CACHE_STACK, value: kubernetes }
+            - { name: JAVA_OPTS_APPEND, value: "-Djgroups.dns.query=keycloak-headless.keycloak.svc.cluster.local" }
+          ports:
+            - { name: http,       containerPort: 8080 }
+            - { name: management, containerPort: 9000 }
+            - { name: jgroups,    containerPort: 7800 }
+          startupProbe:              # first start builds the server + runs DB migrations: allow up to 5 minutes
+            httpGet: { path: /health/started, port: management }
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: { path: /health/ready, port: management }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/live, port: management }
+            periodSeconds: 20
+          resources:
+            requests: { cpu: 300m, memory: 768Mi }
+            limits:   { cpu: "1",  memory: 1536Mi }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } }
+          volumeMounts:
+            - { name: realm-import, mountPath: /opt/keycloak/data/import, readOnly: true }
+      volumes:
+        - name: realm-import
+          configMap: { name: keycloak-realm, optional: true }   # created by scripts/keycloak.sh from k8s/keycloak/realm-demo.json
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: keycloak }
+  minReplicas: 2                     # never fewer than 2 running
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 75 } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: keycloak
+  namespace: keycloak
+spec:
+  minAvailable: 1                    # node drains/upgrades may take at most one replica at a time
+  selector:
+    matchLabels: { app.kubernetes.io/name: keycloak, app.kubernetes.io/component: server }

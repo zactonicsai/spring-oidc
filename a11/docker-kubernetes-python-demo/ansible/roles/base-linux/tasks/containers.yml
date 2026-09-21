@@ -1,0 +1,64 @@
+---
+# Same result as setup/configure.sh step 3, expressed as Ansible modules.
+- name: ACR login with the VM managed identity (no password anywhere)
+  when: registry is search('azurecr.io')
+  block:
+    - name: AAD token from the instance metadata service
+      ansible.builtin.uri:
+        url: "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fmanagement.azure.com%2F"
+        headers:
+          Metadata: "true"
+      register: imds_token
+
+    - name: Exchange it for an ACR refresh token
+      ansible.builtin.uri:
+        url: "https://{{ registry }}/oauth2/exchange"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          grant_type: access_token
+          service: "{{ registry }}"
+          access_token: "{{ imds_token.json.access_token }}"
+      register: acr_token
+
+    - name: Docker login to ACR
+      community.docker.docker_login:
+        registry_url: "{{ registry }}"
+        username: 00000000-0000-0000-0000-000000000000
+        password: "{{ acr_token.json.refresh_token }}"
+      no_log: true
+
+- name: App docker network
+  community.docker.docker_network:
+    name: "{{ app_name }}"
+
+- name: Run one container per service (ports/config from app.config.yaml)
+  community.docker.docker_container:
+    name: "{{ app_name }}-{{ item.name }}"
+    image: "{{ image_ref }}"
+    pull: "{{ registry != '' }}"
+    state: started
+    restart_policy: unless-stopped
+    env: "{{ container_env }}"
+    networks:
+      - name: "{{ app_name }}"
+        aliases: ["{{ app_name }}-{{ item.name }}"]
+    published_ports: "{{ ports_json | from_json }}"
+  vars:
+    image_ref: >-
+      {{ (registry ~ '/' if registry else '')
+         ~ (item.image.repository | replace('${name}', app_name))
+         ~ ':' ~ (item.image.tag | default(app_version, true)) }}
+    wanted_secret_keys: "{{ item.secrets | default([]) | map(attribute='name') | list }}"
+    svc_secrets: "{{ service_secrets | default({}) | dict2items | selectattr('key', 'in', wanted_secret_keys) | list | items2dict }}"
+    container_env: >-
+      {{ (item.config | default({}) | to_json | replace('${name}', app_name) | from_json)
+         | combine({'APP_NAME': app_name, 'SERVICE_NAME': item.name, 'APP_VERSION': app_version})
+         | combine(svc_secrets) }}
+    ports_json: >-
+      [{% for p in item.ports if (p.expose | default('cluster')) == 'public' -%}
+        "{{ p.servicePort | default(p.containerPort) }}:{{ p.containerPort }}"{{ ',' if not loop.last }}
+      {%- endfor %}]
+  loop: "{{ appcfg.services }}"
+  loop_control:
+    label: "{{ app_name }}-{{ item.name }}"

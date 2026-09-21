@@ -1,0 +1,22 @@
+# sshd running as the unprivileged user "dev" — only "dev" can log in, keys only.
+Port 2222
+ListenAddress 0.0.0.0
+HostKey /home/dev/.ssh/host/ssh_host_ed25519_key
+PidFile none
+UsePAM no
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile /etc/devbox/authorized_keys /home/dev/.ssh/authorized_keys
+StrictModes no
+AllowUsers dev
+X11Forwarding no
+AllowTcpForwarding yes
+AllowAgentForwarding yes
+ClientAliveInterval 60
+ClientAliveCountMax 3
+LoginGraceTime 30
+MaxAuthTries 4
+Subsystem sftp internal-sftp
+AcceptEnv LANG LC_* GIT_AUTHOR_* GIT_COMMITTER_*

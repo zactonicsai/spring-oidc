@@ -1,0 +1,67 @@
+{
+  "realm": "demo",
+  "displayName": "Demo realm (grocery store)",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 300,
+  "oauth2DevicePollingInterval": 5,
+  "groups": [
+    { "name": "developers", "path": "/developers" },
+    { "name": "admins", "path": "/admins" },
+    { "name": "customers", "path": "/customers" }
+  ],
+  "users": [
+    {
+      "username": "alice", "enabled": true, "firstName": "Alice", "lastName": "Developer", "email": "alice@example.com", "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
+      "groups": ["/developers"]
+    },
+    {
+      "username": "bob", "enabled": true, "firstName": "Bob", "lastName": "Customer", "email": "bob@example.com", "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "bob", "temporary": false }],
+      "groups": ["/customers"]
+    },
+    {
+      "username": "carol", "enabled": true, "firstName": "Carol", "lastName": "Admin", "email": "carol@example.com", "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "carol", "temporary": false }],
+      "groups": ["/developers", "/admins"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "cli-java",
+      "name": "Java CLI (device authorization grant)",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "attributes": { "oauth2.device.authorization.grant.enabled": "true" },
+      "defaultClientScopes": ["openid", "profile", "email"],
+      "protocolMappers": [
+        {
+          "name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+          "config": { "claim.name": "groups", "full.path": "true", "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "clientId": "cli-go",
+      "name": "Go CLI (authorization code + PKCE on a loopback port, and device grant)",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:8765/callback", "http://127.0.0.1:8765/callback"],
+      "attributes": { "pkce.code.challenge.method": "S256", "oauth2.device.authorization.grant.enabled": "true", "post.logout.redirect.uris": "+" },
+      "defaultClientScopes": ["openid", "profile", "email"],
+      "protocolMappers": [
+        {
+          "name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+          "config": { "claim.name": "groups", "full.path": "true", "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true" }
+        }
+      ]
+    }
+  ]
+}
