@@ -1,0 +1,15 @@
+{{- $root := . -}}
+{{- range $svcName, $svc := .Values.services }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "app.svcname" (list $root $svcName) }}-config
+  namespace: {{ $root.Values.namespace }}
+  labels:
+    {{- include "app.labels" (list $root $svcName) | nindent 4 }}
+data: {{ if not $svc.config }}{}{{ end }}
+  {{- range $k, $v := $svc.config }}
+  {{ $k }}: {{ $v | quote }}
+  {{- end }}
+{{- end }}

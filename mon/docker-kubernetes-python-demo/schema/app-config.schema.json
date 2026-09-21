@@ -1,0 +1,298 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/appconfig.demo/v1/app-config.schema.json",
+  "title": "AppConfig (appconfig.demo/v1)",
+  "description": "Single source of truth for a containerised app: images, ports, settings, secrets, sources, scaling, network rules, host setup and deployment targets.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "services"],
+  "properties": {
+    "apiVersion": { "const": "appconfig.demo/v1" },
+    "kind": { "const": "AppConfig" },
+
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Project name. Must be a valid DNS label (used for namespaces, Helm release, Azure names).",
+          "pattern": "^[a-z0-9]([-a-z0-9]{0,38}[a-z0-9])?$"
+        },
+        "version": { "type": "string", "description": "Default image tag.", "pattern": "^[A-Za-z0-9_.-]{1,64}$" },
+        "description": { "type": "string" },
+        "owner": { "type": "string" },
+        "labels": { "$ref": "#/$defs/stringMap" }
+      }
+    },
+
+    "sources": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "imageRegistry": { "type": "string", "description": "Registry prefix, e.g. myacr.azurecr.io. Empty = local images." },
+        "imagePullSecret": { "type": "string" },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "url", "dest"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$" },
+              "url": { "type": "string", "pattern": "^https?://" },
+              "dest": { "type": "string", "pattern": "^/" },
+              "mode": { "type": "string", "pattern": "^0[0-7]{3}$", "default": "0644" },
+              "owner": { "type": "string", "default": "root" },
+              "sha256": { "type": "string", "pattern": "^([a-f0-9]{64})?$" }
+            }
+          }
+        }
+      }
+    },
+
+    "services": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "image", "ports"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,20}[a-z0-9])?$" },
+          "description": { "type": "string" },
+          "build": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["context"],
+            "properties": {
+              "context": { "type": "string" },
+              "dockerfile": { "type": "string", "default": "Dockerfile" }
+            }
+          },
+          "image": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repository"],
+            "properties": {
+              "repository": { "type": "string" },
+              "tag": { "type": "string" },
+              "pullPolicy": { "enum": ["IfNotPresent", "Always", "Never"], "default": "IfNotPresent" }
+            }
+          },
+          "ports": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "containerPort"],
+              "properties": {
+                "name": { "type": "string", "pattern": "^[a-z0-9-]{1,15}$" },
+                "containerPort": { "$ref": "#/$defs/port" },
+                "servicePort": { "$ref": "#/$defs/port" },
+                "protocol": { "enum": ["TCP", "UDP"], "default": "TCP" },
+                "expose": { "enum": ["none", "cluster", "public"], "default": "cluster" }
+              }
+            }
+          },
+          "config": { "$ref": "#/$defs/stringMap" },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name"],
+              "properties": {
+                "name": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+                "description": { "type": "string" }
+              }
+            }
+          },
+          "health": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string", "pattern": "^/" },
+              "readinessInitialDelaySeconds": { "type": "integer", "minimum": 0 },
+              "livenessInitialDelaySeconds": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "scale": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "replicas": { "type": "integer", "minimum": 0, "maximum": 100 },
+              "autoscale": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": { "type": "boolean" },
+                  "minReplicas": { "type": "integer", "minimum": 1 },
+                  "maxReplicas": { "type": "integer", "minimum": 1 },
+                  "targetCPUUtilizationPercentage": { "type": "integer", "minimum": 1, "maximum": 100 }
+                }
+              }
+            }
+          },
+          "resources": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "requests": { "$ref": "#/$defs/resourceSpec" },
+              "limits": { "$ref": "#/$defs/resourceSpec" }
+            }
+          },
+          "network": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "allowFrom": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+
+    "kubernetes": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "namespace": { "type": "string" },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" }, "defaultDeny": { "type": "boolean" } }
+        },
+        "ingress": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "className": { "type": "string" },
+            "host": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "hosts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "baseImage": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "docker": { "type": "string" },
+            "azure": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["publisher", "offer", "sku"],
+              "properties": {
+                "publisher": { "type": "string" },
+                "offer": { "type": "string" },
+                "sku": { "type": "string" },
+                "version": { "type": "string", "default": "latest" },
+                "urnAlias": { "type": "string" }
+              }
+            }
+          }
+        },
+        "adminUser": { "type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$" },
+        "packages": { "type": "array", "items": { "type": "string" } },
+        "exposePorts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "port"],
+            "properties": {
+              "name": { "type": "string" },
+              "port": { "$ref": "#/$defs/port" },
+              "protocol": { "enum": ["TCP", "UDP"], "default": "TCP" },
+              "source": { "type": "string", "default": "*", "description": "'*' or a CIDR like 203.0.113.4/32" }
+            }
+          }
+        },
+        "setupScript": { "type": "string" },
+        "configureScript": { "type": "string" },
+        "ansible": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" }, "playbook": { "type": "string" } }
+        },
+        "settings": { "$ref": "#/$defs/stringMap" }
+      }
+    },
+
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "local": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "clusterName": { "type": "string" }, "kindConfig": { "type": "string" } }
+        },
+        "azure": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "location": { "type": "string" },
+            "resourceGroup": { "type": "string" },
+            "acrName": { "type": "string", "pattern": "^([a-z0-9]{5,50})?$" },
+            "aks": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "nodeCount": { "type": "integer", "minimum": 1 },
+                "nodeVmSize": { "type": "string" },
+                "autoscale": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "minCount": { "type": "integer", "minimum": 1 },
+                    "maxCount": { "type": "integer", "minimum": 1 }
+                  }
+                },
+                "tier": { "enum": ["free", "standard"] },
+                "kubernetesVersion": { "type": "string" },
+                "networkPolicy": { "enum": ["cilium", "azure", "calico"] }
+              }
+            },
+            "vm": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "enabled": { "type": "boolean" }, "size": { "type": "string" } }
+            },
+            "keyVault": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "enabled": { "type": "boolean" } }
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "stringMap": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$" }
+    },
+    "resourceSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": { "type": "string", "pattern": "^[0-9]+(m|\\.[0-9]+)?$" },
+        "memory": { "type": "string", "pattern": "^[0-9]+(Ki|Mi|Gi|k|M|G)?$" }
+      }
+    }
+  }
+}

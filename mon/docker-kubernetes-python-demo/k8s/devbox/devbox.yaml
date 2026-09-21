@@ -1,0 +1,71 @@
+# Developer workspace: one pod per developer, home on a PersistentVolume, SSH exposed outside.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: devbox
+  labels: { pod-security.kubernetes.io/enforce: baseline }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: devbox-ssh                     # the exposed port: 22 -> container 2222
+  namespace: devbox
+  labels: { app.kubernetes.io/name: devbox }
+spec:
+  type: ClusterIP                      # scripts/devbox.sh switches to LoadBalancer (cloud) or NodePort 30022 (kind)
+  selector: { app.kubernetes.io/name: devbox }
+  ports: [{ name: ssh, port: 22, targetPort: ssh }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: devbox
+  namespace: devbox
+  labels: { app.kubernetes.io/name: devbox }
+spec:
+  serviceName: devbox-ssh
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: devbox }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: devbox }
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: devbox
+          image: devbox:1.0.0                    # scripts/devbox.sh sets the real image (kind-loaded or ACR)
+          imagePullPolicy: IfNotPresent
+          ports: [{ name: ssh, containerPort: 2222 }]
+          env:
+            - { name: TZ, value: UTC }
+          readinessProbe: { tcpSocket: { port: ssh }, periodSeconds: 10 }
+          livenessProbe:  { tcpSocket: { port: ssh }, periodSeconds: 30 }
+          resources:
+            requests: { cpu: 500m, memory: 1Gi }
+            limits:   { cpu: "2",  memory: 4Gi }        # javac/gradle/cmake need headroom
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: ["ALL"] } }
+          volumeMounts:
+            - { name: home, mountPath: /home/dev }
+            - { name: ssh-keys, mountPath: /etc/devbox/authorized_keys, subPath: authorized_keys, readOnly: true }
+      volumes:
+        - name: ssh-keys
+          secret: { secretName: devbox-ssh, defaultMode: 0444 }
+  volumeClaimTemplates:
+    - metadata: { name: home }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: 10Gi } }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: devbox-ssh-in, namespace: devbox }
+spec:
+  podSelector: { matchLabels: { app.kubernetes.io/name: devbox } }
+  policyTypes: ["Ingress"]           # egress stays open: developers need package registries and the internet
+  ingress:
+    - from:
+        - namespaceSelector: {}
+        - ipBlock: { cidr: 0.0.0.0/0 }   # tighten to your office/VPN CIDR, and/or loadBalancerSourceRanges on the Service
+      ports: [{ port: 2222 }]

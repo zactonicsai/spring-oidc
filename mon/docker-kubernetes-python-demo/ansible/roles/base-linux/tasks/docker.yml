@@ -1,0 +1,40 @@
+---
+- name: Check whether docker is already installed
+  ansible.builtin.command: docker --version
+  register: docker_present
+  changed_when: false
+  failed_when: false
+
+- name: Docker apt repository + engine (official method)
+  when: docker_present.rc != 0
+  block:
+    - name: Keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Docker apt source (deb822 format; the module downloads and pins the signing key)
+      ansible.builtin.deb822_repository:
+        name: docker
+        types: [deb]
+        uris: "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}"
+        suites: ["{{ ansible_facts.distribution_release }}"]
+        components: [stable]
+        architectures: ["{{ 'amd64' if ansible_facts.architecture == 'x86_64' else 'arm64' }}"]
+        signed_by: "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}/gpg"
+        state: present
+
+    - name: Install Docker Engine (CLI only inside a container)
+      ansible.builtin.apt:
+        name: "{{ ['docker-ce-cli'] if in_container else docker_apt_packages }}"
+        state: present
+        update_cache: true
+      notify: Restart docker
+
+- name: Docker service enabled and running
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  when: not in_container

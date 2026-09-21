@@ -1,0 +1,33 @@
+{{- $root := . -}}
+{{- range $svcName, $svc := .Values.services }}
+{{- $isPublic := eq (include "app.isPublic" $svc) "true" }}
+{{- $hasExposed := false }}
+{{- range $svc.ports }}{{ if ne (default "cluster" .expose) "none" }}{{ $hasExposed = true }}{{ end }}{{ end }}
+{{- if $hasExposed }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "app.svcname" (list $root $svcName) }}
+  namespace: {{ $root.Values.namespace }}
+  labels:
+    {{- include "app.labels" (list $root $svcName) | nindent 4 }}
+spec:
+  type: {{ if $isPublic }}{{ $root.Values.publicServiceType }}{{ else }}ClusterIP{{ end }}
+  {{- if and $isPublic (ne $root.Values.publicServiceType "ClusterIP") $root.Values.publicServiceSourceRanges }}
+  loadBalancerSourceRanges:
+    {{- toYaml $root.Values.publicServiceSourceRanges | nindent 4 }}
+  {{- end }}
+  selector:
+    {{- include "app.selectorLabels" (list $root $svcName) | nindent 4 }}
+  ports:
+    {{- range $svc.ports }}
+    {{- if ne (default "cluster" .expose) "none" }}
+    - name: {{ .name }}
+      port: {{ default .containerPort .servicePort }}
+      targetPort: {{ .name }}
+      protocol: {{ default "TCP" .protocol }}
+    {{- end }}
+    {{- end }}
+{{- end }}
+{{- end }}

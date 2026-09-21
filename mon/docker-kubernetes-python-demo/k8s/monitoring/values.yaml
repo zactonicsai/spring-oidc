@@ -1,0 +1,75 @@
+# kube-prometheus-stack values (Prometheus Operator + Prometheus + Alertmanager + Grafana +
+# node-exporter + kube-state-metrics + default dashboards/alerts).  helm repo: prometheus-community
+fullnameOverride: kps
+
+# --- control-plane components you cannot scrape on managed/kind clusters: disable them, or
+#     you get permanent "TargetDown" alerts (classic gotcha) ---------------------------------
+kubeControllerManager: { enabled: false }
+kubeScheduler:         { enabled: false }
+kubeEtcd:              { enabled: false }
+kubeProxy:             { enabled: false }
+defaultRules:
+  create: true
+  rules: { etcd: false, kubeControllerManager: false, kubeSchedulerAlerting: false, kubeSchedulerRecording: false, kubeProxy: false }
+
+prometheusOperator:
+  resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 512Mi } }
+
+prometheus:
+  prometheusSpec:
+    scrapeInterval: 30s
+    evaluationInterval: 30s
+    retention: 7d
+    retentionSize: 4GB
+    # !!! the most common gotcha: with the defaults Prometheus only picks up ServiceMonitors/Rules
+    #     carrying the Helm release label. "false" = discover ALL of them in the cluster.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    resources: { requests: { cpu: 200m, memory: 512Mi }, limits: { memory: 2Gi } }
+    # persistence (recommended for anything but a demo):
+    # storageSpec:
+    #   volumeClaimTemplate:
+    #     spec: { accessModes: ["ReadWriteOnce"], resources: { requests: { storage: 20Gi } } }
+  service: { type: ClusterIP }
+
+alertmanager:
+  enabled: true
+  alertmanagerSpec:
+    retention: 48h
+    resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 256Mi } }
+  # route real alerts somewhere: Slack/Teams/PagerDuty receivers go here (see docs/12)
+  config:
+    global: { resolve_timeout: 5m }
+    route:
+      receiver: "null"
+      group_by: ["alertname", "namespace"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - receiver: "null"
+          matchers: ["alertname = Watchdog"]     # the always-firing heartbeat alert
+    receivers:
+      - name: "null"
+
+grafana:
+  enabled: true
+  admin: { existingSecret: grafana-admin, userKey: admin-user, passwordKey: admin-password }
+  defaultDashboardsEnabled: true                 # ~30 Kubernetes dashboards out of the box
+  sidecar:
+    dashboards: { enabled: true, label: grafana_dashboard, labelValue: "1", searchNamespace: ALL }
+    datasources: { enabled: true }
+  service: { type: ClusterIP, port: 80 }         # scripts/monitoring.sh patches to LoadBalancer on cloud
+  resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 512Mi } }
+  grafana.ini:
+    server: { root_url: "%(protocol)s://%(domain)s/" }
+    analytics: { check_for_updates: false }
+    # Later: log in to Grafana with Keycloak (generic_oauth) — see docs/12
+
+kube-state-metrics:
+  resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 256Mi } }
+prometheus-node-exporter:
+  resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 128Mi } }

@@ -1,0 +1,7 @@
+# cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars is git-ignored)
+# docker_host         = "unix:///var/run/docker.sock"
+create_base_host    = true
+mount_docker_socket = false
+run_ansible         = false
+# secrets are better supplied via environment:  export TF_VAR_secrets='{"API_TOKEN":"local-dev-token"}'
+# secrets = { API_TOKEN = "local-dev-token" }

@@ -1,0 +1,104 @@
+{{- $root := . -}}
+{{- range $svcName, $svc := .Values.services }}
+{{- $name := include "app.svcname" (list $root $svcName) }}
+{{- $port0 := index $svc.ports 0 }}
+{{- $health := default dict $svc.health }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ $root.Values.namespace }}
+  labels:
+    {{- include "app.labels" (list $root $svcName) | nindent 4 }}
+spec:
+  {{- if not (default dict $svc.autoscale).enabled }}
+  replicas: {{ default 1 $svc.replicas }}
+  {{- end }}
+  revisionHistoryLimit: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  selector:
+    matchLabels:
+      {{- include "app.selectorLabels" (list $root $svcName) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "app.labels" (list $root $svcName) | nindent 8 }}
+      annotations:
+        # changing config/secret values changes these hashes -> pods restart with the new values
+        checksum/config: {{ toYaml (default dict $svc.config) | sha256sum }}
+        checksum/secret: {{ toYaml (default dict (index $root.Values.secrets $svcName)) | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      {{- with $root.Values.global.imagePullSecret }}
+      imagePullSecrets:
+        - name: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ $root.Values.podSecurity.runAsUser }}
+        runAsGroup: {{ $root.Values.podSecurity.runAsGroup }}
+        fsGroup: {{ $root.Values.podSecurity.runAsGroup }}
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: {{ $svcName }}
+          image: {{ include "app.image" (list $root $svc) | quote }}
+          imagePullPolicy: {{ default "IfNotPresent" $svc.image.pullPolicy }}
+          ports:
+            {{- range $svc.ports }}
+            - name: {{ .name }}
+              containerPort: {{ .containerPort }}
+              protocol: {{ default "TCP" .protocol }}
+            {{- end }}
+          env:
+            - name: APP_NAME
+              value: {{ include "app.name" $root | quote }}
+            - name: SERVICE_NAME
+              value: {{ $svcName | quote }}
+            - name: APP_VERSION
+              value: {{ $root.Values.version | quote }}
+            - name: PORT
+              value: {{ $port0.containerPort | quote }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          envFrom:
+            - configMapRef:
+                name: {{ $name }}-config
+            {{- if $svc.secretKeys }}
+            - secretRef:
+                name: {{ $name }}-secrets
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: {{ default "/health" $health.path }}
+              port: {{ $port0.name }}
+            initialDelaySeconds: {{ default 2 $health.readinessInitialDelaySeconds }}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: {{ default "/health" $health.path }}
+              port: {{ $port0.name }}
+            initialDelaySeconds: {{ default 5 $health.livenessInitialDelaySeconds }}
+            periodSeconds: 10
+          {{- with $svc.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

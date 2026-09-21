@@ -1,0 +1,39 @@
+# NetworkPolicies = doors with badge readers. Step 1: lock every door. Step 2: hand out badges.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: python-demo-default-deny-ingress
+  namespace: python-demo
+spec:
+  podSelector: {}            # every pod in the namespace ...
+  policyTypes: ["Ingress"]   # ... accepts NO incoming connections
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: python-demo-web-allow
+  namespace: python-demo
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: python-demo, app.kubernetes.io/component: web }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector: {}          # any pod anywhere (e.g. an ingress controller)
+        - ipBlock: { cidr: 0.0.0.0/0 }   # any outside IP (load balancer)
+      ports: [{ port: 8080, protocol: TCP }]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: python-demo-api-allow
+  namespace: python-demo
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: python-demo, app.kubernetes.io/component: api }
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:                   # ONLY pods wearing the "web" badge
+            matchLabels: { app.kubernetes.io/name: python-demo, app.kubernetes.io/component: web }
+      ports: [{ port: 8080, protocol: TCP }]

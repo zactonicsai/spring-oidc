@@ -1,0 +1,25 @@
+{{ include "app.name" . }} v{{ .Values.version }} is installed in namespace "{{ .Values.namespace }}".
+
+Services:
+{{- range $svcName, $svc := .Values.services }}
+  - {{ $svcName }}: {{ include "app.svcname" (list $ $svcName) }} ({{ if eq (include "app.isPublic" $svc) "true" }}public{{ else }}cluster-only{{ end }}) image={{ include "app.image" (list $ $svc) }}
+{{- end }}
+
+Reach a PUBLIC service from your laptop:
+{{- range $svcName, $svc := .Values.services }}
+{{- if eq (include "app.isPublic" $svc) "true" }}
+{{- $port0 := index $svc.ports 0 }}
+  kubectl -n {{ $.Values.namespace }} port-forward svc/{{ include "app.svcname" (list $ $svcName) }} 8080:{{ default $port0.containerPort $port0.servicePort }}
+  open http://localhost:8080
+{{- end }}
+{{- end }}
+
+Verify:            helm test {{ .Release.Name }} -n {{ .Values.namespace }}
+Watch pods:        kubectl -n {{ .Values.namespace }} get pods -w
+Watch autoscaling: kubectl -n {{ .Values.namespace }} get hpa -w
+Network rules:     kubectl -n {{ .Values.namespace }} get networkpolicy
+{{- if not .Values.secrets }}
+
+NOTE: no secret values were supplied (values key "secrets" is empty).
+      Create secrets.env, then:  tools/appconfig.py render secrets  and add  -f build/secrets-values.yaml
+{{- end }}

@@ -1,0 +1,74 @@
+# Alerts ABOVE the Kubernetes layer: is the identity service healthy, is the app serving users?
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: app-and-keycloak
+  namespace: monitoring
+  labels: { app.kubernetes.io/name: python-demo }
+spec:
+  groups:
+    - name: keycloak
+      rules:
+        - alert: KeycloakBelowMinReplicas
+          expr: sum(up{namespace="keycloak", container="keycloak"}) < 2
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "Fewer than 2 Keycloak replicas are being scraped"
+            description: "Logins may fail or lose sessions. kubectl -n keycloak get pods"
+        - alert: KeycloakHighLoginFailureRate
+          expr: |
+            sum(rate(keycloak_user_events_total{event="login_error"}[10m]))
+              / clamp_min(sum(rate(keycloak_user_events_total{event=~"login|login_error"}[10m])), 0.01) > 0.3
+            and sum(rate(keycloak_user_events_total{event=~"login|login_error"}[10m])) > 0.05
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "More than 30% of logins are failing"
+            description: "Brute force, a broken client, or a misconfigured realm. Check Keycloak events."
+        - alert: KeycloakHighLatencyP95
+          expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket{namespace="keycloak"}[5m])) by (le)) > 1
+          for: 10m
+          labels: { severity: warning }
+          annotations: { summary: "Keycloak p95 request latency above 1 s" }
+        - alert: KeycloakJvmHeapHigh
+          expr: sum(jvm_memory_used_bytes{namespace="keycloak", area="heap"}) by (pod) / sum(jvm_memory_max_bytes{namespace="keycloak", area="heap"}) by (pod) > 0.9
+          for: 10m
+          labels: { severity: warning }
+          annotations: { summary: "Keycloak JVM heap above 90% on {{ $labels.pod }} — raise memory limit / -Xmx" }
+        - alert: KeycloakDatabaseDown
+          expr: kube_statefulset_status_replicas_ready{namespace="keycloak", statefulset="keycloak-db"} < 1
+          for: 2m
+          labels: { severity: critical }
+          annotations: { summary: "The Keycloak Postgres pod is not ready" }
+    - name: python-demo
+      rules:
+        - alert: AppHighErrorRate
+          expr: |
+            sum(rate(flask_http_request_total{namespace="python-demo", status=~"5.."}[5m])) by (job)
+              / clamp_min(sum(rate(flask_http_request_total{namespace="python-demo"}[5m])) by (job), 0.01) > 0.05
+          for: 5m
+          labels: { severity: critical }
+          annotations: { summary: "{{ $labels.job }}: more than 5% of requests return 5xx" }
+        - alert: AppHighLatencyP95
+          expr: histogram_quantile(0.95, sum(rate(flask_http_request_duration_seconds_bucket{namespace="python-demo"}[5m])) by (le, job)) > 0.5
+          for: 10m
+          labels: { severity: warning }
+          annotations: { summary: "{{ $labels.job }}: p95 latency above 500 ms" }
+        - alert: AppNoTraffic
+          expr: sum(rate(flask_http_request_total{namespace="python-demo", job=~".*-web"}[15m])) == 0
+          for: 30m
+          labels: { severity: info }
+          annotations: { summary: "The web service received no requests for 30 minutes (dead front door or nobody home?)" }
+    - name: platform-extras
+      rules:
+        - alert: DevboxNotReady
+          expr: kube_statefulset_status_replicas_ready{namespace="devbox", statefulset="devbox"} < 1
+          for: 5m
+          labels: { severity: warning }
+          annotations: { summary: "The developer pod is not ready (SSH will fail)" }
+        - alert: PersistentVolumeAlmostFull
+          expr: kubelet_volume_stats_available_bytes{namespace=~"keycloak|devbox|monitoring"} / kubelet_volume_stats_capacity_bytes < 0.10
+          for: 15m
+          labels: { severity: warning }
+          annotations: { summary: "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} is over 90% full" }

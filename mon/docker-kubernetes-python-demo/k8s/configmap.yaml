@@ -1,0 +1,19 @@
+# ConfigMaps = the store's public notice board: settings anyone may read.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: python-demo-web-config
+  namespace: python-demo
+data:
+  GREETING: "Welcome to the Grocery Store"
+  API_URL: "http://python-demo-api"
+  LOG_LEVEL: "info"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: python-demo-api-config
+  namespace: python-demo
+data:
+  GREETING: "Hello from the stock room"
+  LOG_LEVEL: "info"

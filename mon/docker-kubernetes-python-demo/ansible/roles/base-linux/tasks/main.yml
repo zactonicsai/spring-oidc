@@ -1,0 +1,75 @@
+---
+# ---- 1. packages ------------------------------------------------------------------
+- name: Install base packages from hosts.packages
+  ansible.builtin.apt:
+    name: "{{ hostcfg.packages | default(['curl', 'ca-certificates']) }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# ---- 2. docker --------------------------------------------------------------------
+- name: Docker Engine
+  ansible.builtin.import_tasks: docker.yml
+
+# ---- 3. firewall (hosts.exposePorts) ---------------------------------------------------
+- name: Firewall — allow listed ports
+  community.general.ufw:
+    rule: allow
+    port: "{{ item.port | string }}"
+    proto: "{{ item.protocol | default('TCP') | lower }}"
+    comment: "{{ app_name }} {{ item.name }}"
+  loop: "{{ hostcfg.exposePorts | default([]) }}"
+  loop_control:
+    label: "{{ item.name }} {{ item.port }}/{{ item.protocol | default('TCP') }}"
+  when: not in_container
+
+- name: Firewall — deny everything else and enable
+  community.general.ufw:
+    state: enabled
+    policy: deny
+    direction: incoming
+  when: not in_container
+
+# ---- 4. admin user ------------------------------------------------------------------
+- name: Read the group database (is there a docker group?)
+  ansible.builtin.getent:
+    database: group
+
+- name: Admin user exists and may use docker
+  ansible.builtin.user:
+    name: "{{ hostcfg.adminUser | default('azureuser') }}"
+    shell: /bin/bash
+    groups: "{{ 'docker' if 'docker' in ansible_facts.getent_group else omit }}"
+    append: "{{ 'docker' in ansible_facts.getent_group }}"
+
+# ---- 5. timezone ----------------------------------------------------------------------
+- name: Timezone from hosts.settings.TIMEZONE
+  community.general.timezone:
+    name: "{{ hostcfg.settings.TIMEZONE }}"
+  when:
+    - hostcfg.settings.TIMEZONE is defined
+    - not in_container
+
+# ---- 6. external files (sources.files) -----------------------------------------------
+- name: Download external files
+  ansible.builtin.import_tasks: files.yml
+
+# ---- 7. settings ------------------------------------------------------------------------
+- name: Settings directory
+  ansible.builtin.file:
+    path: "/etc/{{ app_name }}"
+    state: directory
+    mode: "0755"
+
+- name: Write /etc/<app>/config.env
+  ansible.builtin.template:
+    src: config.env.j2
+    dest: "/etc/{{ app_name }}/config.env"
+    mode: "0640"
+
+# ---- 8. containers ------------------------------------------------------------------------
+- name: Run the app containers
+  ansible.builtin.import_tasks: containers.yml
+  when:
+    - run_demo_containers | bool
+    - not in_container
