@@ -1,0 +1,32 @@
+[Unit]
+Description=Demo Application Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=demoapp
+Group=demoapp
+WorkingDirectory=/opt/demo-app
+ExecStart=/opt/demo-app/bin/demo-app
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Basic hardening. Test with your application before adding stricter controls.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+# Environment values can be kept outside the unit file.
+EnvironmentFile=-/etc/demo-app/demo-app.env
+
+# Send stdout/stderr to journald.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=demo-app
+
+[Install]
+WantedBy=multi-user.target
