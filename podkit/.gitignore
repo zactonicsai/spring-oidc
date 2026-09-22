@@ -1,0 +1,12 @@
+build/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+*.jks
+*.p12
+*.key

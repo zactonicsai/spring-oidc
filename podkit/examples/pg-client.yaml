@@ -1,0 +1,76 @@
+# Example 1: a pod that talks to an EXTERNAL PostgreSQL database.
+#
+# What podgen derives from `externalServices.postgres`:
+#   * PGHOST/PGPORT/PGDATABASE/PGUSER/PGSSLMODE env vars
+#   * PGPASSWORD read from the cloud secret store at deploy time (never stored in git)
+#   * a NetworkPolicy egress rule to the database CIDR on 5432
+#   * a post-deploy step (ansible/playbooks/postgres-client.yml) that checks the connection,
+#     runs bootstrap.sql and pushes /tmp/database.conf into the running pods
+#
+# Generate for one or all clouds:
+#   python -m podgen generate examples/pg-client.yaml --provider aws
+#   python -m podgen generate examples/pg-client.yaml --provider all
+apiVersion: podkit/v1
+kind: PodConfig
+metadata:
+  name: pg-client
+  namespace: apps
+  labels:
+    team: orders
+spec:
+  provider: aws                     # overridden by --provider; the cloud block below must exist
+  cloud:
+    aws:
+      region: us-east-1
+      clusterName: demo-eks
+      identityMode: irsa            # or pod-identity
+    azure:
+      resourceGroup: rg-demo
+      clusterName: demo-aks
+      keyVaultName: kv-demo         # holds the secret referenced below
+    gcp:
+      project: demo-project
+      location: us-central1
+      clusterName: demo-gke
+
+  # Stand-in image that ships psql; replace with your application image.
+  image:
+    repository: postgres
+    tag: 16-alpine
+  command: ["sleep", "infinity"]
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+  scheduling:
+    spot: true                      # batch/stateless work is fine on spot capacity
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 70                   # "postgres" user of the alpine image
+
+  identity:
+    enabled: true                   # cloud identity for the pod (IRSA / Workload Identity)
+
+  externalServices:
+    postgres:
+      host: pg.internal.example.com
+      port: 5432
+      database: orders
+      user: orders_app
+      sslMode: require
+      passwordSecretRef: orders-pg-password     # name in Secrets Manager / Key Vault / Secret Manager
+      networkCidr: 10.50.0.0/16                 # database subnet, for the egress rule
+      bootstrapSql: pg-client-bootstrap.sql     # relative to this file; must be idempotent
+
+  files:
+    - path: /app/config/application.properties
+      content: |
+        app.name=pg-client
+        db.pool.size=5
+
+  networkPolicy:
+    enabled: true                   # default deny + DNS + 443 (identity) + database CIDR
+
+  configure:
+    method: ansible                 # or: shell -> configure/postgres-client.sh
+    phase: post

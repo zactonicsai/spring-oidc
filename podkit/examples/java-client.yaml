@@ -1,0 +1,43 @@
+# Example 2b: the CLIENT side of pod-to-pod mutual TLS with Java keystores.
+# Same flow as java-server, but the certificate only carries extendedKeyUsage=clientAuth.
+# The configuration step here uses the SHELL variant instead of Ansible, to show both work.
+apiVersion: podkit/v1
+kind: PodConfig
+metadata:
+  name: java-client
+  namespace: apps
+spec:
+  provider: aws
+  cloud:
+    aws:   { region: us-east-1, clusterName: demo-eks }
+    azure: { resourceGroup: rg-demo, clusterName: demo-aks }
+    gcp:   { project: demo-project, location: us-central1, clusterName: demo-gke }
+
+  image:
+    repository: ghcr.io/acme/java-mtls
+    tag: 1.0.0
+  command: ["java", "/app/Client.java"]
+  env:
+    SERVER_URL: https://java-server.apps.svc.cluster.local:8443/
+    INTERVAL_SECONDS: "10"
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { cpu: 500m, memory: 256Mi }
+  scheduling:
+    spot: true
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+
+  tls:
+    role: client
+
+  networkPolicy:
+    enabled: true
+    egressTo:
+      - podLabels:
+          app.kubernetes.io/name: java-server
+
+  configure:
+    method: shell                 # configure/java-keystore.sh from the command pod
+    phase: pre

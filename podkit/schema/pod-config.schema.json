@@ -1,0 +1,346 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://podkit.dev/schemas/pod-config/v1.json",
+  "title": "PodConfig",
+  "description": "One workload to deploy on an existing EKS, AKS or GKE cluster. `podgen` turns this document into Terraform, Kubernetes manifests, deploy/destroy shell scripts and the Ansible or shell configuration that the in-cluster command pod runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "const": "podkit/v1" },
+    "kind": { "const": "PodConfig" },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/dnsLabel", "description": "Workload name. Also used for the Deployment, Service and ServiceAccount." },
+        "namespace": { "$ref": "#/$defs/dnsLabel", "default": "default" },
+        "labels": { "$ref": "#/$defs/stringMap" },
+        "annotations": { "$ref": "#/$defs/stringMap" }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image"],
+      "properties": {
+        "provider": {
+          "enum": ["aws", "azure", "gcp"],
+          "description": "Target cloud. `podgen generate --provider` overrides this."
+        },
+        "cloud": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How to reach the existing cluster, per provider. Only the block for the selected provider is used, so one PodConfig can carry all three.",
+          "properties": {
+            "aws": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["region", "clusterName"],
+              "properties": {
+                "region": { "type": "string" },
+                "clusterName": { "type": "string" },
+                "identityMode": {
+                  "enum": ["irsa", "pod-identity"],
+                  "default": "irsa",
+                  "description": "irsa = IAM Roles for Service Accounts (needs the cluster OIDC provider in IAM). pod-identity = EKS Pod Identity (needs the eks-pod-identity-agent add-on)."
+                }
+              }
+            },
+            "azure": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["resourceGroup", "clusterName"],
+              "properties": {
+                "resourceGroup": { "type": "string" },
+                "clusterName": { "type": "string" },
+                "subscriptionId": { "type": "string" },
+                "keyVaultName": { "type": "string", "description": "Key Vault that holds the secrets referenced by `spec.secrets[].ref` (RBAC permission model)." },
+                "keyVaultResourceGroup": { "type": "string", "description": "Defaults to `resourceGroup`." }
+              }
+            },
+            "gcp": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["project", "location", "clusterName"],
+              "properties": {
+                "project": { "type": "string" },
+                "location": { "type": "string", "description": "Cluster region or zone." },
+                "clusterName": { "type": "string" }
+              }
+            }
+          }
+        },
+        "image": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["repository"],
+          "properties": {
+            "repository": { "type": "string" },
+            "tag": { "type": "string", "default": "latest" },
+            "pullPolicy": { "enum": ["IfNotPresent", "Always", "Never"], "default": "IfNotPresent" }
+          }
+        },
+        "command": { "$ref": "#/$defs/stringList" },
+        "args": { "$ref": "#/$defs/stringList" },
+        "replicas": { "type": "integer", "minimum": 0, "default": 1 },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Always set requests and limits: they drive scheduling, bin-packing and therefore cost.",
+          "properties": {
+            "requests": { "$ref": "#/$defs/quantities", "default": { "cpu": "100m", "memory": "128Mi" } },
+            "limits": { "$ref": "#/$defs/quantities", "default": { "cpu": "500m", "memory": "256Mi" } }
+          }
+        },
+        "scheduling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "spot": {
+              "type": "boolean",
+              "default": false,
+              "description": "Run on spot / preemptible capacity: EKS managed node groups with capacityType=SPOT, AKS spot node pools, GKE Spot VMs. Adds the provider's node selector and toleration."
+            },
+            "nodeSelector": { "$ref": "#/$defs/stringMap" },
+            "tolerations": { "type": "array", "items": { "$ref": "#/$defs/toleration" } }
+          }
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "containerPort"],
+            "properties": {
+              "name": { "$ref": "#/$defs/dnsLabel" },
+              "containerPort": { "$ref": "#/$defs/port" },
+              "protocol": { "enum": ["TCP", "UDP"], "default": "TCP" }
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"], "default": "ClusterIP", "description": "LoadBalancer creates a billable cloud load balancer. Prefer ClusterIP plus a shared ingress." },
+            "port": { "$ref": "#/$defs/port", "description": "Service port for the first container port. Defaults to the container port." }
+          }
+        },
+        "probe": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": { "enum": ["none", "http", "tcp"], "default": "none" },
+            "path": { "type": "string", "default": "/" },
+            "port": { "type": ["string", "integer"], "description": "Port name or number. Defaults to the first container port." },
+            "initialDelaySeconds": { "type": "integer", "minimum": 0, "default": 5 },
+            "periodSeconds": { "type": "integer", "minimum": 1, "default": 10 }
+          }
+        },
+        "env": { "$ref": "#/$defs/stringMap" },
+        "secrets": {
+          "type": "array",
+          "description": "Secret environment variables. Either `ref` (read from the cloud secret store at deploy time and written to Secret <name>-env) or an existing Kubernetes Secret (`secret` + `key`).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["env"],
+            "properties": {
+              "env": { "$ref": "#/$defs/envName" },
+              "ref": { "type": "string", "description": "AWS Secrets Manager name/ARN, Key Vault secret name or Secret Manager secret id." },
+              "secret": { "type": "string" },
+              "key": { "type": "string" }
+            },
+            "oneOf": [ { "required": ["ref"] }, { "required": ["secret", "key"] } ]
+          }
+        },
+        "files": {
+          "type": "array",
+          "description": "Small config files stored in a ConfigMap and mounted read-only. Durable configuration belongs here, not in files pushed into a running pod.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "content"],
+            "properties": {
+              "path": { "type": "string", "pattern": "^/" },
+              "content": { "type": "string" }
+            }
+          }
+        },
+        "mounts": {
+          "type": "array",
+          "description": "Existing Secrets or ConfigMaps to mount (for example keystores created by a pre-deploy configuration step).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path"],
+            "properties": {
+              "name": { "$ref": "#/$defs/dnsLabel" },
+              "secret": { "type": "string" },
+              "configMap": { "type": "string" },
+              "path": { "type": "string", "pattern": "^/" },
+              "readOnly": { "type": "boolean", "default": true }
+            },
+            "oneOf": [ { "required": ["secret"] }, { "required": ["configMap"] } ]
+          }
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Bind the ServiceAccount to a cloud identity (IRSA / Pod Identity, Azure Workload Identity, GKE Workload Identity). The identity is granted read access to the secrets in `spec.secrets` plus anything listed here.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "aws": { "type": "object", "additionalProperties": false, "properties": { "policyArns": { "$ref": "#/$defs/stringList", "default": [] } } },
+            "azure": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "roleAssignments": {
+                  "type": "array",
+                  "default": [],
+                  "items": { "type": "object", "additionalProperties": false, "required": ["scope", "role"], "properties": { "scope": { "type": "string" }, "role": { "type": "string" } } }
+                }
+              }
+            },
+            "gcp": { "type": "object", "additionalProperties": false, "properties": { "roles": { "$ref": "#/$defs/stringList", "default": [] } } }
+          }
+        },
+        "securityContext": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "runAsNonRoot": { "type": "boolean", "default": false },
+            "runAsUser": { "type": "integer", "minimum": 0 },
+            "runAsGroup": { "type": "integer", "minimum": 0 },
+            "fsGroup": { "type": "integer", "minimum": 0 },
+            "readOnlyRootFilesystem": { "type": "boolean", "default": false }
+          }
+        },
+        "externalServices": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "postgres": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["host", "database", "user"],
+              "description": "An external PostgreSQL database. Adds PGHOST/PGPORT/PGDATABASE/PGUSER/PGSSLMODE, PGPASSWORD from a secret, an egress rule and a default post-deploy configuration step.",
+              "properties": {
+                "host": { "type": "string" },
+                "port": { "$ref": "#/$defs/port", "default": 5432 },
+                "database": { "type": "string" },
+                "user": { "type": "string" },
+                "sslMode": { "enum": ["disable", "allow", "prefer", "require", "verify-ca", "verify-full"], "default": "require" },
+                "passwordSecretRef": { "type": "string", "description": "Cloud secret holding the password (see `spec.secrets[].ref`)." },
+                "passwordSecret": {
+                  "type": "object", "additionalProperties": false, "required": ["name", "key"],
+                  "properties": { "name": { "type": "string" }, "key": { "type": "string" } },
+                  "description": "Existing Kubernetes Secret holding the password."
+                },
+                "networkCidr": { "type": "string", "description": "CIDR of the database, used for the egress NetworkPolicy rule." },
+                "bootstrapSql": { "type": "string", "description": "Optional .sql file (path relative to this PodConfig) applied with psql from the command pod. Keep it idempotent." }
+              }
+            }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role"],
+          "description": "Pod-to-pod mutual TLS with Java keystores. A pre-deploy step issues a certificate from a shared CA and stores a JKS keystore and truststore as Secrets, mounted under `mountPath` and exposed as KEYSTORE_PATH/TRUSTSTORE_PATH plus *_PASSWORD env vars.",
+          "properties": {
+            "role": { "enum": ["server", "client"] },
+            "caSecret": { "type": "string", "default": "podkit-mtls-ca" },
+            "keystoreSecret": { "type": "string", "description": "Defaults to <name>-keystore." },
+            "truststoreSecret": { "type": "string", "default": "podkit-mtls-truststore" },
+            "mountPath": { "type": "string", "default": "/etc/tls", "pattern": "^/" },
+            "dnsNames": { "$ref": "#/$defs/stringList", "default": [], "description": "Extra SANs. Servers automatically get <name>, <name>.<ns>, <name>.<ns>.svc and <name>.<ns>.svc.cluster.local." },
+            "validityDays": { "type": "integer", "minimum": 1, "default": 365 }
+          }
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Default-deny NetworkPolicy for the pod with explicit allow rules. Requires a CNI that enforces NetworkPolicy (all three managed offerings can).",
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "allowDns": { "type": "boolean", "default": true },
+            "allowHttpsEgress": { "type": "boolean", "description": "Allow egress to any address on 443 (cloud token and secret endpoints). Defaults to true when identity is enabled." },
+            "ingressFrom": {
+              "type": "array", "default": [],
+              "items": { "type": "object", "additionalProperties": false, "required": ["podLabels"], "properties": { "podLabels": { "$ref": "#/$defs/stringMap" } } }
+            },
+            "egressTo": {
+              "type": "array", "default": [],
+              "items": { "type": "object", "additionalProperties": false, "required": ["podLabels"], "properties": { "podLabels": { "$ref": "#/$defs/stringMap" } } }
+            },
+            "egress": {
+              "type": "array", "default": [],
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["cidr", "port"],
+                "properties": { "cidr": { "type": "string" }, "port": { "$ref": "#/$defs/port" }, "protocol": { "enum": ["TCP", "UDP"], "default": "TCP" } }
+              }
+            }
+          }
+        },
+        "autoscaling": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "default": false },
+            "minReplicas": { "type": "integer", "minimum": 1, "default": 1 },
+            "maxReplicas": { "type": "integer", "minimum": 1, "default": 3 },
+            "targetCPUUtilizationPercentage": { "type": "integer", "minimum": 1, "maximum": 100, "default": 70 }
+          }
+        },
+        "configure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method"],
+          "description": "Configuration executed from the command pod. Defaults are derived from `externalServices.postgres` (post-deploy) and `tls` (pre-deploy).",
+          "properties": {
+            "method": { "enum": ["none", "ansible", "shell"] },
+            "phase": { "enum": ["pre", "post"], "description": "pre = before the workload is applied (create secrets, keystores, schemas). post = after the rollout is ready (push runtime files, smoke tests)." },
+            "playbook": { "type": "string", "description": "Playbook path relative to ./ansible (method: ansible)." },
+            "script": { "type": "string", "description": "Script path relative to the repository root (method: shell)." },
+            "vars": {
+              "type": "object",
+              "description": "Extra variables for the playbook or script. Override any derived defaults.",
+              "additionalProperties": { "type": ["string", "number", "boolean", "array"] }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    { "if": { "properties": { "spec": { "properties": { "provider": { "const": "aws" } }, "required": ["provider"] } } },
+      "then": { "properties": { "spec": { "properties": { "cloud": { "required": ["aws"] } }, "required": ["cloud"] } } } },
+    { "if": { "properties": { "spec": { "properties": { "provider": { "const": "azure" } }, "required": ["provider"] } } },
+      "then": { "properties": { "spec": { "properties": { "cloud": { "required": ["azure"] } }, "required": ["cloud"] } } } },
+    { "if": { "properties": { "spec": { "properties": { "provider": { "const": "gcp" } }, "required": ["provider"] } } },
+      "then": { "properties": { "spec": { "properties": { "cloud": { "required": ["gcp"] } }, "required": ["cloud"] } } } }
+  ],
+  "$defs": {
+    "dnsLabel": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63 },
+    "envName": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "stringMap": { "type": "object", "additionalProperties": { "type": "string" }, "default": {} },
+    "stringList": { "type": "array", "items": { "type": "string" } },
+    "quantities": { "type": "object", "additionalProperties": { "type": "string" } },
+    "toleration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key"],
+      "properties": {
+        "key": { "type": "string" },
+        "operator": { "enum": ["Equal", "Exists"], "default": "Equal" },
+        "value": { "type": "string" },
+        "effect": { "enum": ["NoSchedule", "PreferNoSchedule", "NoExecute"] }
+      }
+    }
+  }
+}

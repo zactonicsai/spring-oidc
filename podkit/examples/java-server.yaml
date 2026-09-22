@@ -1,0 +1,57 @@
+# Example 2a: the SERVER side of pod-to-pod mutual TLS with Java keystores.
+#
+# What podgen derives from `tls`:
+#   * a pre-deploy step (ansible/playbooks/java-keystore.yml) that creates a shared CA
+#     (Secret podkit-mtls-ca), issues a server certificate with the Service DNS names as SANs,
+#     and stores keystore.jks (+ password) and a shared truststore.jks (+ password) as Secrets
+#   * both Secrets mounted under /etc/tls and exposed as KEYSTORE_PATH, TRUSTSTORE_PATH,
+#     KEYSTORE_PASSWORD, TRUSTSTORE_PASSWORD
+#
+# Build the image from examples/java-mtls/Dockerfile first.
+apiVersion: podkit/v1
+kind: PodConfig
+metadata:
+  name: java-server
+  namespace: apps
+spec:
+  provider: aws
+  cloud:
+    aws:   { region: us-east-1, clusterName: demo-eks }
+    azure: { resourceGroup: rg-demo, clusterName: demo-aks }
+    gcp:   { project: demo-project, location: us-central1, clusterName: demo-gke }
+
+  image:
+    repository: ghcr.io/acme/java-mtls
+    tag: 1.0.0
+  command: ["java", "/app/Server.java"]
+  ports:
+    - name: https
+      containerPort: 8443
+  service:
+    enabled: true
+    type: ClusterIP               # reachable as java-server.apps.svc.cluster.local:8443
+  probe:
+    type: tcp                     # a TLS listener cannot answer a plain HTTP probe
+    port: https
+    initialDelaySeconds: 10
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: "1", memory: 512Mi }
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+
+  tls:
+    role: server
+    validityDays: 365
+    # caSecret / truststoreSecret defaults are shared by every pod in the namespace
+
+  networkPolicy:
+    enabled: true
+    ingressFrom:
+      - podLabels:
+          app.kubernetes.io/name: java-client   # only the client may connect
+
+  configure:
+    method: ansible               # or: shell -> configure/java-keystore.sh
+    phase: pre

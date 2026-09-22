@@ -1,0 +1,13 @@
+output "identity" {
+  description = "Cloud identity bound to the ServiceAccount (IAM role ARN / managed identity client id / GSA email). Paste into pod.env as IDENTITY_ID for the kubectl path."
+  value       = module.cloud.identity_id
+}
+
+output "service_dns" {
+  description = "In-cluster DNS name of the Service (null when disabled)."
+  value       = module.pod.service_dns
+}
+
+output "deployment" {
+  value = module.pod.deployment_name
+}

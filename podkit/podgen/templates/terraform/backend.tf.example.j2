@@ -1,0 +1,29 @@
+# Rename to backend.tf to keep state (and the secret values it contains) in an encrypted remote backend.
+{% if provider == "aws" %}
+terraform {
+  backend "s3" {
+    bucket       = "CHANGE_ME-tfstate"
+    key          = "podkit/{{ namespace }}/{{ name }}.tfstate"
+    region       = {{ cloud.region | hcl }}
+    encrypt      = true
+    use_lockfile = true
+  }
+}
+{% elif provider == "azure" %}
+terraform {
+  backend "azurerm" {
+    resource_group_name  = "CHANGE_ME-rg"
+    storage_account_name = "changemetfstate"
+    container_name       = "tfstate"
+    key                  = "podkit/{{ namespace }}/{{ name }}.tfstate"
+    use_azuread_auth     = true
+  }
+}
+{% elif provider == "gcp" %}
+terraform {
+  backend "gcs" {
+    bucket = "CHANGE_ME-tfstate"
+    prefix = "podkit/{{ namespace }}/{{ name }}"
+  }
+}
+{% endif %}

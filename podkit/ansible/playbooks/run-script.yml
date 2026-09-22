@@ -1,0 +1,66 @@
+---
+# Generic step: copy a shell script into every running pod of a workload and execute it there.
+# Use it for one-off maintenance (cache warm-up, reload a config, run a migration binary).
+#
+# Variables: namespace, target_selector, container, script (path, relative to build_dir if not absolute),
+#            script_args (string, optional)
+- name: Run a script inside the pods of a workload
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    script_args: ""
+    remote_dir: /tmp
+  tasks:
+    - name: Resolve the script path
+      ansible.builtin.set_fact:
+        script_path: "{{ script if script.startswith('/') else build_dir ~ '/' ~ script }}"
+        remote_script: "{{ remote_dir }}/podkit-{{ script | basename }}"
+
+    - name: Check the script exists
+      ansible.builtin.stat:
+        path: "{{ script_path }}"
+      register: script_stat
+      failed_when: not script_stat.stat.exists
+
+    - name: Find the running pods
+      kubernetes.core.k8s_info:
+        kind: Pod
+        namespace: "{{ namespace }}"
+        label_selectors: ["{{ target_selector }}"]
+        field_selectors: ["status.phase=Running"]
+      register: pods
+
+    - name: Make sure at least one pod is running
+      ansible.builtin.assert:
+        that: pods.resources | length > 0
+        fail_msg: "no running pod matches {{ target_selector }} in {{ namespace }}"
+
+    - name: Copy the script into each pod
+      kubernetes.core.k8s_cp:
+        namespace: "{{ namespace }}"
+        pod: "{{ item.metadata.name }}"
+        container: "{{ container }}"
+        local_path: "{{ script_path }}"
+        remote_path: "{{ remote_script }}"
+      loop: "{{ pods.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+
+    - name: Execute it
+      kubernetes.core.k8s_exec:
+        namespace: "{{ namespace }}"
+        pod: "{{ item.metadata.name }}"
+        container: "{{ container }}"
+        command: "sh {{ remote_script }} {{ script_args }}"
+      loop: "{{ pods.resources }}"
+      loop_control:
+        label: "{{ item.metadata.name }}"
+      register: runs
+
+    - name: Output
+      ansible.builtin.debug:
+        msg: "{{ item.item.metadata.name }}:\n{{ item.stdout | default('') }}{{ item.stderr | default('') }}"
+      loop: "{{ runs.results }}"
+      loop_control:
+        label: "{{ item.item.metadata.name }}"
