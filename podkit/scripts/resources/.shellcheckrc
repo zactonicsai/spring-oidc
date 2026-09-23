@@ -1,0 +1,3 @@
+# Plugin files define RESOURCE_* for the dispatcher and read pod.env variables (NAME, PROVIDER, ...).
+disable=SC2034,SC2153
+source-path=SCRIPTDIR

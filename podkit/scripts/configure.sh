@@ -60,22 +60,30 @@ quote_args() { local q=""; local a; for a in "$@"; do q+=" $(printf '%q' "$a")";
 case "$via" in
   command-pod)
     require_cmd kubectl tar
-    cp="$PODKIT_ROOT/scripts/command-pod.sh"
-    "$cp" ensure
-    "$cp" sync "$PODKIT_ROOT/ansible" /work/podkit/ansible
-    "$cp" sync "$PODKIT_ROOT/configure" /work/podkit/configure
-    "$cp" sync "$build_dir" "$remote_build"
+    cp=("$PODKIT_ROOT/bin/podkit" command-pod)
+    "${cp[@]}" ensure
+    "${cp[@]}" sync "$PODKIT_ROOT/ansible" /work/podkit/ansible
+    "${cp[@]}" sync "$PODKIT_ROOT/configure" /work/podkit/configure
+    # vars/env files outside the build directory are copied into it so the sync carries them along
+    if [[ "$method" == "ansible" ]]; then
+      case "$vars_file" in "$build_dir"/*) ;; *) cp "$vars_file" "$build_dir/.podkit-vars.yml"; vars_file="$build_dir/.podkit-vars.yml" ;; esac
+      remote_vars="$remote_build/${vars_file#"$build_dir"/}"
+    else
+      case "$env_file" in "$build_dir"/*) ;; *) cp "$env_file" "$build_dir/.podkit-configure.env"; env_file="$build_dir/.podkit-configure.env" ;; esac
+      remote_env="$remote_build/${env_file#"$build_dir"/}"
+    fi
+    "${cp[@]}" sync "$build_dir" "$remote_build"
     if [[ "$method" == "ansible" ]]; then
       log "Running playbook $playbook in the command pod"
-      "$cp" run -- bash -lc "cd /work/podkit/ansible && ansible-playbook '$playbook' \
-        -e @'$remote_build/ansible/vars.yml' -e build_dir='$remote_build'$(quote_args ${extra[@]+"${extra[@]}"})"
+      "${cp[@]}" run -- bash -lc "cd /work/podkit/ansible && ansible-playbook '$playbook' \
+        -e @'$remote_vars' -e build_dir='$remote_build'$(quote_args ${extra[@]+"${extra[@]}"})"
     else
       log "Running script $script in the command pod"
-      "$cp" run -- bash -lc "export BUILD_DIR='$remote_build'; set -a; . '$remote_build/configure.env'; set +a; \
+      "${cp[@]}" run -- bash -lc "export BUILD_DIR='$remote_build'; set -a; . '$remote_env'; set +a; \
         bash '/work/podkit/$script'$(quote_args ${extra[@]+"${extra[@]}"})"
     fi
     if [[ "$scale_down" == "1" ]]; then
-      "$cp" scale 0
+      "${cp[@]}" scale 0
     fi ;;
   local)
     export BUILD_DIR="$build_dir"

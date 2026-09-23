@@ -5,6 +5,7 @@
 # cloud_secret_get PROVIDER REF -> prints the secret value (uses AWS_REGION / AZURE_KEY_VAULT / GCP_PROJECT)
 cloud_secret_get() {
   local provider=$1 ref=$2
+  if dry_run; then printf '[dry-run] read secret %s from %s\n' "$ref" "$(secret_store_name "$provider")" >&2; echo "dry-run"; return 0; fi
   case "$provider" in
     aws)
       aws secretsmanager get-secret-value --secret-id "$ref" ${AWS_REGION:+--region "$AWS_REGION"} \
@@ -22,5 +23,12 @@ cloud_secret_get() {
 cloud_cli() {
   case "$1" in
     aws) echo aws ;; azure) echo az ;; gcp) echo gcloud ;; *) die "unknown provider: $1" ;;
+  esac
+}
+
+# secret_store_name PROVIDER -> human name of the cloud secret store
+secret_store_name() {
+  case "$1" in
+    aws) echo "AWS Secrets Manager" ;; azure) echo "Azure Key Vault" ;; gcp) echo "Google Secret Manager" ;; *) echo "$1" ;;
   esac
 }

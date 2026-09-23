@@ -8,19 +8,28 @@ python -m podgen generate {{ source_file }} --provider {{ provider }} --force
 
 | File | Purpose |
 | --- | --- |
-| `deploy.sh` / `destroy.sh` | kubectl path: secrets from {{ secret_store }}, ServiceAccount, workload, rollout, configuration |
-| `configure.sh` | {{ configure.method }} configuration{% if configure.method != 'none' %} (`{{ configure.target }}`, {{ configure.phase }}-deploy) run from the command pod{% endif %} |
+| `deploy.sh` / `destroy.sh` / `configure.sh` | Wrappers around `podkit pod deploy`, `podkit pod destroy`, `podkit configure run` for this build |
+| `pod.env` | The build's settings (cluster, secrets, identity, TLS, configure step) read by every `podkit` plugin |
 | `k8s/` | ServiceAccount and workload manifests (Deployment, Service, NetworkPolicy, ...) |
 | `terraform/` | Root module using `terraform/modules/{{ provider }}` and `terraform/modules/pod` |
-| `pod.env` | Cluster settings shared by the scripts; set `IDENTITY_ID` from `terraform output identity` |
 {% if configure.method != 'none' %}
-| `ansible/vars.yml`, `configure.env` | Variables for the Ansible playbook / shell script |
+| `ansible/vars.yml`, `configure.env` | Variables for the {{ configure.method }} step `{{ configure.target }}` ({{ configure.phase }}-deploy) |
 {% endif %}
 
 ```bash
-../../../scripts/cluster-login.sh -p {{ provider }} -c {{ cloud.clusterName }} {% if provider == 'aws' %}-r {{ cloud.region }}{% elif provider == 'azure' %}-g {{ cloud.resourceGroup }}{% else %}-P {{ cloud.project }} -l {{ cloud.location }}{% endif %}
-
-./deploy.sh                                   # kubectl path
-../../../scripts/deploy.sh -m terraform .     # or: Terraform path (creates the cloud identity too)
-./destroy.sh
+podkit cluster login .                       # kubeconfig for {{ cloud.clusterName }}
+podkit doctor .                              # tools, cloud CLI and cluster access
+podkit pod deploy .                          # kubectl path
+podkit pod deploy . -m terraform             # or the Terraform path (creates the cloud identity too)
+podkit pod status . ; podkit pod logs . -f
+podkit destroy . --everything                # workload + secrets + TLS + identity + namespace
 ```
+{% if identity.enabled %}
+
+Cloud identity: `podkit identity apply .` creates it with Terraform and stores `IDENTITY_ID` in `pod.env`;
+`podkit pod deploy .` then binds it to the ServiceAccount.
+{% endif %}
+{% if tls %}
+
+TLS: `podkit tls status {{ namespace }}` shows the CA, truststore and keystores; `podkit tls rotate .` reissues this pod's certificate.
+{% endif %}

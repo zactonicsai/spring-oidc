@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# podkit — one CLI for every resource the toolkit manages (pods, secrets, identities, TLS material,
+# the command pod, namespaces, clusters...). Each resource is a plugin in scripts/resources/<name>.sh;
+# drop a new file there (or in plugins/, $PODKIT_PLUGIN_PATH, ~/.podkit/plugins) to add a resource.
+#
+#   podkit <resource> <verb> [args]        e.g.  podkit pod deploy build/aws/pg-client
+#   podkit destroy BUILD_DIR | --all       tear down a build (or everything podkit created)
+#   podkit generate|validate CONFIG...     shortcuts for `podkit config generate|validate`
+#   podkit resources                       list resources and their verbs
+#   podkit help [resource]                 help
+#
+# Global options (anywhere on the line):
+#   -y, --yes        never ask for confirmation          --dry-run   print commands instead of running them
+#   --context CTX    kubectl context to use               -v          trace (set -x)
+set -Eeuo pipefail
+
+_self="${BASH_SOURCE[0]}"
+while [[ -L "$_self" ]]; do _self="$(readlink "$_self")"; done   # follow symlinks (make install)
+PODKIT_ROOT="${PODKIT_ROOT:-$(cd "$(dirname "$_self")/.." && pwd)}"
+export PODKIT_ROOT
+# shellcheck source=../scripts/lib/common.sh
+source "$PODKIT_ROOT/scripts/lib/common.sh"
+# shellcheck source=../scripts/lib/plugin.sh
+source "$PODKIT_ROOT/scripts/lib/plugin.sh"
+
+# ---- global options ---------------------------------------------------------------------------
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y|--yes)   export PODKIT_YES=1; shift ;;
+    --dry-run)  export PODKIT_DRY_RUN=1; shift ;;
+    --context)  [[ $# -ge 2 ]] || die "--context needs a value"; export KUBE_CONTEXT=$2; shift 2 ;;
+    --context=*) export KUBE_CONTEXT=${1#--context=}; shift ;;
+    -v|--verbose) set -x; shift ;;
+    --) shift; args+=("$@"); break ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- ${args[@]+"${args[@]}"}
+
+usage() { sed -n '2,15p' "$_self" | sed 's/^# \{0,1\}//'; }
+
+resource="${1:-help}"
+[[ $# -gt 0 ]] && shift
+
+case "$resource" in
+  -h|--help|help)
+    if [[ -n "${1:-}" ]]; then
+      plugin_load "$1" || die "unknown resource '$1' (see: podkit resources)"
+      plugin_usage
+    else
+      usage; echo; plugin_list
+    fi
+    exit 0 ;;
+  resources|list-resources) plugin_list; exit 0 ;;
+  version|--version) echo "podkit $(cat "$PODKIT_ROOT/VERSION" 2>/dev/null || echo dev)"; exit 0 ;;
+  generate|validate|schema) set -- "$resource" "$@"; resource="config" ;;   # shortcuts
+esac
+
+plugin_load "$resource" || die "unknown resource '$resource' (see: podkit resources)"
+
+verb="${1:-}"
+case "$verb" in
+  ""|help|-h|--help)
+    if [[ -z "$verb" ]] && declare -F cmd__default >/dev/null; then :; else plugin_usage; exit 0; fi ;;
+esac
+
+if [[ -n "$verb" ]] && plugin_has_verb "$verb"; then
+  shift
+  "cmd_$verb" "$@"
+elif declare -F cmd__default >/dev/null; then
+  cmd__default "$@"
+else
+  die "unknown verb '$verb' for resource '$resource' (verbs: $RESOURCE_VERBS)"
+fi

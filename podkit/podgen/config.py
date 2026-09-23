@@ -360,6 +360,7 @@ def build_context(raw: dict, *, out_dir: Path, modules_source: str | None = None
         },
         "env": dict(sorted(env.items())),
         "cloud_secrets": cloud_secrets,
+        "cloud_secrets_csv": ",".join(f"{k}={v}" for k, v in sorted(cloud_secrets.items())),
         "k8s_secret_env": k8s_secret_env,
         "files": files,
         "files_checksum": files_checksum,

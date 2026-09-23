@@ -88,8 +88,9 @@ def test_postgres_flow(tmp_path: Path) -> None:
     assert (out / "bootstrap.sql").is_file()
     env_file = (out / "configure.env").read_text()
     assert 'BOOTSTRAP_SQL="${BUILD_DIR}/bootstrap.sql"' in env_file
-    assert "cloud_secret_get" in (out / "deploy.sh").read_text()
-    assert "--method ansible --playbook playbooks/postgres-client.yml" in (out / "configure.sh").read_text()
+    env_pod = (out / "pod.env").read_text()
+    assert "CLOUD_SECRETS=PGPASSWORD=orders-pg-password" in env_pod and "ENV_SECRET=pg-client-env" in env_pod
+    assert "CONFIGURE_TARGET=playbooks/postgres-client.yml" in env_pod and "CONFIGURE_PHASE=post" in env_pod
 
 
 def test_tls_flow(tmp_path: Path) -> None:
@@ -103,11 +104,11 @@ def test_tls_flow(tmp_path: Path) -> None:
     mounts = {m["name"]: m["mountPath"] for m in deployment["spec"]["template"]["spec"]["containers"][0]["volumeMounts"]}
     assert mounts == {"keystore": "/etc/tls/keystore", "truststore": "/etc/tls/truststore"}
     assert "Service" in {d["kind"] for d in docs}
-    # pre-deploy step runs before the workload is applied
-    deploy = (server / "deploy.sh").read_text()
-    assert deploy.index('"$HERE/configure.sh"') < deploy.index("Applying workload manifests")
+    server_env = (server / "pod.env").read_text()
+    assert "CONFIGURE_PHASE=pre" in server_env and "TLS_KEYSTORE_SECRET=java-server-keystore" in server_env
     # the client uses the shell variant
-    assert "--method shell --script configure/java-keystore.sh" in (client / "configure.sh").read_text()
+    client_env = (client / "pod.env").read_text()
+    assert "CONFIGURE_METHOD=shell" in client_env and "CONFIGURE_TARGET=configure/java-keystore.sh" in client_env
     assert "IS_SERVER=false" in (client / "configure.env").read_text()
 
 

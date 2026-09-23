@@ -25,6 +25,7 @@ choices you can make. You do not need to know Terraform or Ansible to follow alo
 git clone <this repo> podkit && cd podkit
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+make install          # puts the `podkit` command on your PATH (symlink to bin/podkit)
 ```
 
 ### Step 2 — look at the pod description
@@ -59,19 +60,20 @@ Change the four lines marked `<-` to match your cluster and database.
 ### Step 3 — generate the files
 
 ```bash
-python -m podgen validate examples/pg-client.yaml
-python -m podgen generate examples/pg-client.yaml --provider aws
+podkit validate examples/pg-client.yaml
+podkit generate examples/pg-client.yaml --provider aws
 ```
 
 You now have `build/aws/pg-client/`:
 
 ```
-deploy.sh, destroy.sh, configure.sh   scripts for the kubectl path
+deploy.sh, destroy.sh, configure.sh   wrappers around `podkit pod deploy|destroy` / `podkit configure run`
+pod.env                               everything the CLI needs to know about this build
 k8s/serviceaccount.yaml               the pod's own ServiceAccount
 k8s/workload.yaml                     ConfigMap, Deployment, NetworkPolicy
 terraform/*.tf                        the same workload as a Terraform root module
 ansible/vars.yml, configure.env       inputs for the post-deploy configuration step
-bootstrap.sql, pod.env, README.md
+bootstrap.sql, README.md
 ```
 
 Open `k8s/workload.yaml` and read it. Everything in it came from the 30 lines above:
@@ -82,8 +84,8 @@ that allows DNS, HTTPS to cloud APIs, and port 5432 to `10.50.0.0/16` — nothin
 ### Step 4 — point kubectl at your cluster
 
 ```bash
-scripts/cluster-login.sh -p aws -c demo-eks -r us-east-1
-kubectl get nodes        # should list your nodes
+podkit cluster login build/aws/pg-client     # reads cluster name and region from pod.env
+podkit doctor build/aws/pg-client            # checks kubectl, the aws CLI and your access
 ```
 
 ### Step 5 — build and deploy the command pod (once per cluster)
@@ -91,10 +93,9 @@ kubectl get nodes        # should list your nodes
 The command pod is a tiny pod that runs the configuration steps *inside* the cluster.
 
 ```bash
-docker build -t ghcr.io/your-org/podkit-command-pod:latest -f command-pod/Dockerfile .
-docker push ghcr.io/your-org/podkit-command-pod:latest
 export COMMAND_POD_IMAGE=ghcr.io/your-org/podkit-command-pod:latest
-TARGET_NAMESPACES=apps scripts/command-pod.sh deploy
+podkit image build --push                    # docker build -f command-pod/Dockerfile, then push
+TARGET_NAMESPACES=apps podkit command-pod deploy
 ```
 
 ### Step 6 — give the pod a cloud identity (Terraform, optional but recommended)
@@ -103,16 +104,19 @@ The pod itself does not need cloud permissions in this example (the deploy scrip
 secret for it), so you can skip this step. If your app will call AWS APIs, run:
 
 ```bash
-scripts/deploy.sh -m terraform build/aws/pg-client      # creates the IAM role + deploys
+podkit identity apply build/aws/pg-client    # Terraform, module.cloud only; stores IDENTITY_ID in pod.env
+# or, to let Terraform manage the workload too:
+podkit pod deploy build/aws/pg-client -m terraform
 ```
 
-or, to use kubectl for the deploy and Terraform only for the role, copy the `identity` output
-into `build/aws/pg-client/pod.env` as `IDENTITY_ID=arn:aws:iam::...`.
+`podkit identity apply` writes the role ARN into `pod.env` for you; the next `podkit pod deploy`
+binds it to the pod's ServiceAccount.
 
 ### Step 7 — deploy
 
 ```bash
-scripts/deploy.sh build/aws/pg-client
+podkit pod deploy build/aws/pg-client --dry-run   # first look: every command that WOULD run
+podkit pod deploy build/aws/pg-client             # now for real
 ```
 
 What happens, in order:
@@ -129,14 +133,14 @@ What happens, in order:
 ### Step 8 — check, then clean up
 
 ```bash
-kubectl -n apps get pods,networkpolicy
-kubectl -n apps exec deploy/pg-client -- sh -c 'psql -c "\dt"'   # PG* env vars are set
-scripts/command-pod.sh scale 0                                   # idle = free
-scripts/destroy.sh build/aws/pg-client                           # when you are done
+podkit pod status build/aws/pg-client
+podkit pod exec build/aws/pg-client -- sh -c 'psql -c "\dt"'   # PG* env vars are set
+podkit command-pod scale 0                                     # idle = free
+podkit destroy build/aws/pg-client --everything                # workload, secrets, identity, namespace
 ```
 
 To deploy the same pod to Azure or GCP, change nothing but the flag:
-`python -m podgen generate examples/pg-client.yaml --provider gcp`.
+`podkit generate examples/pg-client.yaml --provider gcp`.
 
 ---
 
@@ -167,25 +171,25 @@ podkit hides those differences behind `spec.provider` and `spec.cloud`.
 
 Both paths create exactly the same objects; pick one per pod.
 
-| | kubectl path (`deploy.sh`) | Terraform path (`deploy.sh -m terraform`) |
+| | kubectl path (`podkit pod deploy`) | Terraform path (`podkit pod deploy -m terraform`) |
 | --- | --- | --- |
 | Pros | nothing to install but kubectl; readable YAML; fast; easy to debug | tracks state, shows a plan before changing anything, also creates the cloud identity and IAM permissions |
 | Cons | no plan/diff; cloud identity must come from somewhere else | needs Terraform and a state backend; secret values end up in the state file |
 | Best for | day-to-day deploys, CI pipelines, learning | teams already on Terraform, pods that need cloud permissions |
 
-Tip: use Terraform once for the identity, and kubectl for everyday deploys — `pod.env` glues
-them together through `IDENTITY_ID`.
+Tip: use Terraform once for the identity (`podkit identity apply`), and kubectl for everyday
+deploys — `pod.env` glues them together through `IDENTITY_ID`.
 
 ### The command pod
 
 Configuration steps (create a keystore, run SQL, copy a file into a pod) need tools —
 `openssl`, `keytool`, `psql`, `ansible` — and network access to the database and the API
 server. Instead of installing all of that on every laptop and CI runner, podkit runs the steps
-inside a small **command pod** (`sleep infinity` + the tools). `scripts/configure.sh` copies the
+inside a small **command pod** (`sleep infinity` + the tools). `podkit configure run` copies the
 playbooks and your build folder into it and runs the step there. It gets only *namespaced*
 permissions (Role + RoleBinding per namespace you allow) and scales to zero when idle.
 
-You can still run steps from your machine with `CONFIGURE_VIA=local` if you have the tools.
+You can still run steps from your machine with `--via local` if you have the tools.
 
 ### Ansible or shell?
 
@@ -198,8 +202,9 @@ thing. `configure.method` picks one.
 | Cons | needs Python + collections in the image; slower start | you write the "did it already happen?" logic yourself |
 | Best for | multi-step flows, teams that already use Ansible | small one-off jobs, quick fixes |
 
-Override any input at run time: `build/aws/java-server/configure.sh -e rotate=true` (Ansible) or
-`build/aws/java-client/configure.sh ROTATE=true` (shell).
+Override any input at run time: `podkit configure run build/aws/java-server -- -e rotate=true`
+(Ansible) or `podkit configure run build/aws/java-client -- ROTATE=true` (shell); for keystores
+`podkit tls rotate BUILD_DIR` does exactly that.
 
 ### Pre-deploy vs post-deploy
 
@@ -229,7 +234,7 @@ flows (`tls` → pre, `postgres` → post).
 | `tls` | the Java keystore mTLS flow (secrets, mounts, env, pre-deploy step) | — |
 | `configure` | `method`, `phase`, custom `playbook`/`script`, extra `vars` | derived |
 
-Run `python -m podgen schema` to print the full JSON Schema with every description.
+Run `podkit schema` to print the full JSON Schema with every description.
 
 ---
 
@@ -242,10 +247,11 @@ trust). podkit builds both for you.
 
 ```bash
 docker build -t ghcr.io/acme/java-mtls:1.0.0 examples/java-mtls && docker push ghcr.io/acme/java-mtls:1.0.0
-python -m podgen generate examples/java-server.yaml examples/java-client.yaml --provider aws
-scripts/deploy.sh build/aws/java-server     # pre-deploy: CA + server keystore + shared truststore
-scripts/deploy.sh build/aws/java-client     # pre-deploy: client keystore (same CA, shell variant)
-kubectl -n apps logs deploy/java-client     # 200 hello CN=java-client from java-server-...
+podkit generate examples/java-server.yaml examples/java-client.yaml --provider aws
+podkit pod deploy build/aws/java-server     # pre-deploy: CA + server keystore + shared truststore
+podkit pod deploy build/aws/java-client     # pre-deploy: client keystore (same CA, shell variant)
+podkit pod logs build/aws/java-client       # 200 hello CN=java-client from java-server-...
+podkit tls status apps                      # CA, truststore and both keystores with expiry dates
 ```
 
 What the pre-deploy step does (`ansible/playbooks/java-keystore.yml` or `configure/java-keystore.sh`):
@@ -260,8 +266,8 @@ What the pre-deploy step does (`ansible/playbooks/java-keystore.yml` or `configu
 
 The pod sees `KEYSTORE_PATH`, `TRUSTSTORE_PATH`, `KEYSTORE_PASSWORD`, `TRUSTSTORE_PASSWORD`;
 `examples/java-mtls/Server.java` and `Client.java` show the ten lines of Java that use them.
-Rotate a certificate with `configure.sh -e rotate=true`; rotate the CA by deleting
-`podkit-mtls-ca` and rotating every pod.
+Rotate a certificate with `podkit tls rotate BUILD_DIR`; rotate the CA with
+`podkit tls destroy BUILD_DIR --ca` followed by `podkit tls rotate` for every pod in the namespace.
 
 JKS or PKCS12? Since Java 9 the default keystore format is PKCS12 and JKS is considered legacy,
 but every Java version still reads JKS and many apps expect it, so podkit produces JKS. Change
@@ -312,7 +318,7 @@ PodConfig stays the same.
 * Secret Manager and Secret Manager API must be enabled in the project.
 
 **Everywhere**
-* The command pod must be able to reach your database for the PostgreSQL post-deploy step (allow the `ops` namespace in your firewalls, or run the step with `CONFIGURE_VIA=local`).
+* The command pod must be able to reach your database for the PostgreSQL post-deploy step (allow the `ops` namespace in your firewalls, or run the step with `podkit configure run BUILD_DIR --via local`).
 * `kubectl cp` / `k8s_cp` need `tar` inside the target image.
 * Terraform state contains the secret values it read: use the encrypted remote backend from `backend.tf.example`.
 
@@ -321,12 +327,53 @@ PodConfig stays the same.
 ## Part 7 — Cheat sheet
 
 ```bash
-python -m podgen validate CONFIG...                              # check
-python -m podgen generate CONFIG... --provider aws|azure|gcp|all # generate build/<cloud>/<name>
-scripts/cluster-login.sh -p <cloud> ...                          # kubeconfig
-scripts/command-pod.sh deploy|ensure|status|shell|scale N|destroy
-scripts/deploy.sh [-m terraform] [-y] build/<cloud>/<name>
-build/<cloud>/<name>/configure.sh [-e key=value | KEY=VALUE]     # rerun the configuration step
-scripts/destroy.sh [-m terraform] [-y] build/<cloud>/<name>
-make test                                                        # pytest: every example, every cloud
+podkit validate CONFIG...                                   # check
+podkit generate CONFIG... --provider aws|azure|gcp|all      # generate build/<cloud>/<name>
+podkit cluster login BUILD_DIR | -p <cloud> ...             # kubeconfig
+podkit doctor [BUILD_DIR]                                   # tools, cloud CLI, access
+podkit image build --push ; podkit command-pod deploy|ensure|status|shell|scale N|destroy
+podkit pod deploy|destroy|status|logs|restart|scale|exec|diff BUILD_DIR [-m terraform]
+podkit identity apply|status|destroy BUILD_DIR              # cloud identity only
+podkit secret sync BUILD_DIR ; podkit secret get|set|list|destroy ...
+podkit tls issue|rotate|destroy BUILD_DIR ; podkit tls status NS
+podkit configure run BUILD_DIR [--via local] [-- extra] ; podkit configure script BUILD_DIR my.sh
+podkit destroy BUILD_DIR [--tls --identity --namespace | --everything]
+podkit destroy all [--builds build --command-pod --namespaces]
+podkit status ; podkit resources ; podkit help <resource>
+# global: --dry-run  -y  --context CTX  -v
+make test                                                   # pytest: generator + CLI
 ```
+
+---
+
+## Part 8 — The CLI is a set of plugins
+
+`bin/podkit` does almost nothing itself: it parses the global options, finds the resource you
+named and calls `cmd_<verb>` inside that resource's file. Each resource lives in
+`scripts/resources/<name>.sh` and follows a five-line contract:
+
+| Piece | Meaning |
+| --- | --- |
+| `RESOURCE_DESC` | one line shown by `podkit resources` |
+| `RESOURCE_VERBS` | the verbs; the dispatcher refuses a plugin whose verbs have no `cmd_<verb>` function |
+| `cmd_<verb>()` | what runs for `podkit <name> <verb> ...` |
+| `cmd__default()` | optional: runs when there is no verb (`podkit status`, `podkit destroy BUILD_DIR`) |
+| `<name>_*()` | library functions other plugins reuse through `plugin_source <name>` |
+
+Why this shape?
+
+* **One implementation.** The generated `deploy.sh` is a three-line wrapper; the real steps live
+  in `pod.sh` and reuse `secret_sync_build`, `identity_bind_build` and `configure_run_build` from
+  the other plugins. Fix a bug once, every build benefits.
+* **Safe by default.** `kube`, `tf` and `run` print instead of executing under `--dry-run`, and
+  `confirm` guards every destroy, so a new plugin gets previews and prompts for free.
+* **Plug in the future.** A Redis cache, a Kafka topic, an ingress rule, a backup job: one file in
+  `plugins/` (or `~/.podkit/plugins/`, or a directory on `$PODKIT_PLUGIN_PATH`) and it shows up in
+  `podkit resources` with `deploy`/`destroy` verbs like everything else. Naming a file after a
+  built-in replaces the built-in, so you can fork a resource without touching the toolkit.
+* **Destroy is a first-class verb.** Every resource has `destroy`; `podkit destroy` composes them
+  in dependency order (workload → TLS → identity → namespace) and `podkit destroy all` removes the
+  whole footprint by label, so nothing is left behind and nothing you did not create is touched.
+
+Copy `scripts/resources/_template.sh` to start your own plugin; `tests/test_cli.py` shows how to
+test one with `--dry-run` and no cluster.
