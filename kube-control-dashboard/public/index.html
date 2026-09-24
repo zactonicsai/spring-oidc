@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="description" content="Kube Control Dashboard - multi-provider Kubernetes monitoring and operations UI" />
+  <title>Kube Control Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            ibmblue: { 50:'#edf5ff', 100:'#d0e2ff', 500:'#0f62fe', 600:'#0043ce', 700:'#002d9c', 900:'#001141' }
+          },
+          boxShadow: { soft: '0 8px 30px rgba(15, 98, 254, .10)' }
+        }
+      }
+    }
+  </script>
+  <style>
+    :root { --base-font: 16px; }
+    html { font-size: var(--base-font); }
+    body { font-family: IBM Plex Sans, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+    .status-dot { width:.6rem; height:.6rem; border-radius:9999px; display:inline-block; }
+    .mono { font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    dialog::backdrop { background: rgba(2, 6, 23, .58); }
+    .table-wrap { overflow:auto; max-height: 31rem; }
+  </style>
+</head>
+<body class="h-full bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-100 transition-colors">
+  <div class="min-h-full">
+    <header class="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+      <div class="mx-auto max-w-[1800px] px-3 sm:px-6 py-3 flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0 mr-auto">
+          <div class="h-10 w-10 rounded bg-ibmblue-600 text-white flex items-center justify-center font-bold text-lg">K8</div>
+          <div class="min-w-0">
+            <h1 class="font-semibold text-lg sm:text-xl truncate">Kube Control Dashboard</h1>
+            <p class="text-xs text-slate-500 dark:text-slate-400 truncate">Monitor • logs • configuration • upgrades • multi-cloud</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="fontDown" class="btn-secondary" title="Decrease font size">A−</button>
+          <span id="fontSizeLabel" class="text-xs w-12 text-center text-slate-500">16px</span>
+          <button id="fontUp" class="btn-secondary" title="Increase font size">A+</button>
+          <button id="themeToggle" class="btn-secondary" title="Toggle dark/light mode">☾ / ☀</button>
+          <button data-open-dialog="helpDialog" class="btn-primary">Help</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="mx-auto max-w-[1800px] p-3 sm:p-6 space-y-5">
+      <section class="rounded-xl border border-slate-200 bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+        <div class="grid gap-4 xl:grid-cols-[1.2fr_1fr_1fr_.7fr_auto] items-end">
+          <label class="block">
+            <span class="label">Hosting / platform</span>
+            <select id="providerSelect" class="input"></select>
+          </label>
+          <label class="block">
+            <span class="label">Kube context</span>
+            <select id="contextSelect" class="input"><option>Loading…</option></select>
+          </label>
+          <label class="block">
+            <span class="label">Namespace</span>
+            <select id="namespaceSelect" class="input"><option value="all">All namespaces</option></select>
+          </label>
+          <label class="block">
+            <span class="label">Auto refresh</span>
+            <select id="autoRefresh" class="input"><option value="0">Off</option><option value="15">15 sec</option><option value="30">30 sec</option><option value="60">60 sec</option></select>
+          </label>
+          <button id="refreshBtn" class="btn-primary h-11">Refresh cluster</button>
+        </div>
+        <div class="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-sm">
+          <span><span id="connectionDot" class="status-dot bg-amber-500 mr-2"></span><strong id="connectionText">Checking API…</strong></span>
+          <span class="text-slate-500 dark:text-slate-400">Context: <span id="contextText" class="mono">—</span></span>
+          <span class="text-slate-500 dark:text-slate-400">Server: <span id="serverVersion" class="mono">—</span></span>
+          <span class="text-slate-500 dark:text-slate-400">kubectl: <span id="clientVersion" class="mono">—</span></span>
+          <span id="writeModeBadge" class="badge badge-warn">Write mode unknown</span>
+        </div>
+        <div id="providerHint" class="mt-3 rounded-lg bg-ibmblue-50 p-3 text-sm text-slate-800 dark:bg-slate-800 dark:text-slate-200"></div>
+      </section>
+
+      <section class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" id="summaryCards"></section>
+
+      <nav class="overflow-x-auto border-b border-slate-200 dark:border-slate-800" aria-label="Dashboard tabs">
+        <div class="flex min-w-max gap-1" id="tabs"></div>
+      </nav>
+
+      <section id="panel-overview" class="tab-panel active space-y-5">
+        <div class="grid gap-5 xl:grid-cols-3">
+          <div class="card xl:col-span-2">
+            <div class="card-head"><div><h2>Cluster health</h2><p>What Kubernetes is running right now.</p></div><button data-open-dialog="healthInfo" class="link-btn">What is this?</button></div>
+            <div id="healthGrid" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h2>Recent warnings</h2><p>Events that may need attention.</p></div></div>
+            <div id="eventList" class="space-y-2 max-h-80 overflow-auto"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>How traffic flows</h2><p>A simple mental model.</p></div></div>
+          <div class="grid gap-3 md:grid-cols-5 text-center text-sm">
+            <div class="flow-box">You / Browser<br><span>Dashboard UI</span></div><div class="flow-arrow">→</div>
+            <div class="flow-box">Local API proxy<br><span>Node + kubectl</span></div><div class="flow-arrow">→</div>
+            <div class="flow-box">Kubernetes API Server<br><span>Control plane</span></div>
+          </div>
+          <p class="mt-3 text-sm text-slate-600 dark:text-slate-300">The browser does not keep your kubeconfig token. The local proxy calls <code>kubectl</code>, and <code>kubectl</code> uses the selected context and your normal provider login.</p>
+        </div>
+      </section>
+
+      <section id="panel-workloads" class="tab-panel space-y-5">
+        <div class="card">
+          <div class="card-head"><div><h2>Deployments</h2><p>Desired replicas versus available replicas.</p></div><button id="openApplyBtn" class="btn-primary">Apply YAML</button></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Namespace</th><th>Name</th><th>Ready</th><th>Updated</th><th>Available</th><th>Age</th><th>Actions</th></tr></thead><tbody id="deploymentRows"></tbody></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>Pods</h2><p>The running containers that actually do the work.</p></div></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Namespace</th><th>Name</th><th>Ready</th><th>Status</th><th>Restarts</th><th>Node</th><th>Age</th><th>Actions</th></tr></thead><tbody id="podRows"></tbody></table></div>
+        </div>
+      </section>
+
+      <section id="panel-services" class="tab-panel">
+        <div class="card">
+          <div class="card-head"><div><h2>Services</h2><p>Stable network names and ports in front of pods.</p></div></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Namespace</th><th>Name</th><th>Type</th><th>Cluster IP</th><th>External</th><th>Ports</th><th>Age</th></tr></thead><tbody id="serviceRows"></tbody></table></div>
+        </div>
+      </section>
+
+      <section id="panel-nodes" class="tab-panel">
+        <div class="card">
+          <div class="card-head"><div><h2>Nodes</h2><p>Worker machines registered with the cluster.</p></div></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Ready</th><th>Kubernetes</th><th>OS</th><th>Runtime</th><th>Internal IP</th><th>Age</th></tr></thead><tbody id="nodeRows"></tbody></table></div>
+        </div>
+      </section>
+
+      <section id="panel-logs" class="tab-panel space-y-4">
+        <div class="card">
+          <div class="card-head"><div><h2>Pod logs</h2><p>Choose a pod, then ask Kubernetes for its recent log lines.</p></div></div>
+          <div class="grid gap-3 md:grid-cols-4 items-end">
+            <label><span class="label">Pod</span><select id="logPod" class="input"></select></label>
+            <label><span class="label">Container (optional)</span><input id="logContainer" class="input" placeholder="container name" /></label>
+            <label><span class="label">Tail lines</span><input id="logTail" class="input" type="number" value="200" min="1" max="5000" /></label>
+            <div class="flex gap-2"><button id="loadLogsBtn" class="btn-primary flex-1">Load logs</button><button id="clearLogsBtn" class="btn-secondary">Clear</button></div>
+          </div>
+          <pre id="logOutput" class="mono mt-4 min-h-80 max-h-[55vh] overflow-auto rounded-lg bg-slate-950 p-4 text-xs text-slate-100">Select a pod and click “Load logs”.</pre>
+        </div>
+      </section>
+
+      <section id="panel-command" class="tab-panel space-y-5">
+        <div class="grid gap-5 xl:grid-cols-2">
+          <div class="card">
+            <div class="card-head"><div><h2>Safe command center</h2><p>Common Kubernetes operations without a raw shell.</p></div><span id="writeHint" class="badge badge-warn">Checking write mode…</span></div>
+            <div class="space-y-3">
+              <label><span class="label">Action</span><select id="commandAction" class="input">
+                <option value="rollout">Check deployment rollout</option><option value="scale">Scale deployment</option><option value="restart">Restart deployment rollout</option><option value="deletePod">Delete pod (controller usually recreates it)</option><option value="setImage">Set deployment container image</option>
+              </select></label>
+              <div id="commandFields"></div>
+              <button id="runCommandBtn" class="btn-primary w-full">Run selected action</button>
+              <pre id="commandOutput" class="mono min-h-32 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">No command run yet.</pre>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h2>kubectl examples</h2><p>The dashboard is a friendly face over these same ideas.</p></div></div>
+            <div id="kubectlExamples" class="space-y-3"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-helm" class="tab-panel space-y-5">
+        <div class="grid gap-5 xl:grid-cols-2">
+          <div class="card">
+            <div class="card-head"><div><h2>Keycloak with Helm</h2><p>Install an identity provider into Kubernetes, then inspect it like any other workload.</p></div><a class="link-btn" href="https://github.com/bitnami/charts/tree/main/bitnami/keycloak" target="_blank" rel="noreferrer">Chart docs ↗</a></div>
+            <div id="keycloakHelmExamples" class="space-y-3"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h2>OIDC web app</h2><p>A browser public client uses Authorization Code + PKCE. Do not put a client secret in JavaScript.</p></div><a class="link-btn" href="https://www.keycloak.org/securing-apps/overview" target="_blank" rel="noreferrer">Keycloak OIDC docs ↗</a></div>
+            <div id="oidcHelmExamples" class="space-y-3"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>How the demo fits together</h2><p>The files are under <code>helm-examples/</code> in this project.</p></div></div>
+          <div class="grid gap-3 md:grid-cols-5 text-center text-sm">
+            <div class="flow-box">Browser<br><span>localhost:8088</span></div><div class="flow-arrow">→</div>
+            <div class="flow-box">Keycloak<br><span>OIDC login + tokens</span></div><div class="flow-arrow">→</div>
+            <div class="flow-box">Kubernetes<br><span>Helm-managed pods/services</span></div>
+          </div>
+          <div class="mt-4 grid gap-3 lg:grid-cols-3 text-sm">
+            <div class="rounded-lg border border-slate-200 p-3 dark:border-slate-700"><strong>1. Helm</strong><p class="mt-1 text-slate-600 dark:text-slate-300">Installs Keycloak and the sample web application as repeatable packages.</p></div>
+            <div class="rounded-lg border border-slate-200 p-3 dark:border-slate-700"><strong>2. Keycloak client</strong><p class="mt-1 text-slate-600 dark:text-slate-300">The demo uses a public OIDC client with exact redirect URI and Web Origin values.</p></div>
+            <div class="rounded-lg border border-slate-200 p-3 dark:border-slate-700"><strong>3. PKCE</strong><p class="mt-1 text-slate-600 dark:text-slate-300">The browser proves it started the login before Keycloak exchanges the authorization code for tokens.</p></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-compatibility" class="tab-panel space-y-5">
+        <div class="grid gap-5 xl:grid-cols-2">
+          <div class="card">
+            <div class="card-head"><div><h2>Version compatibility checker</h2><p>Check common kubectl, kubelet, and Helm version-skew rules.</p></div></div>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <label><span class="label">API server</span><input id="checkServer" class="input" value="1.36" placeholder="1.36" /></label>
+              <label><span class="label">kubectl</span><input id="checkKubectl" class="input" value="1.36" placeholder="1.36" /></label>
+              <label><span class="label">kubelet</span><input id="checkKubelet" class="input" value="1.35" placeholder="1.35" /></label>
+              <label><span class="label">Helm</span><input id="checkHelm" class="input" value="3.21" placeholder="3.21 or 4.2" /></label>
+            </div>
+            <button id="checkVersionsBtn" class="btn-primary mt-3">Check versions</button>
+            <div id="compatResults" class="mt-4 space-y-2"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div><h2>Manifest API checker</h2><p>Paste YAML to flag a few common APIs removed from newer Kubernetes releases.</p></div></div>
+            <label><span class="label">Target Kubernetes</span><input id="manifestTarget" class="input" value="1.36" /></label>
+            <textarea id="manifestCheckText" class="input mono mt-3 h-52" placeholder="apiVersion: apps/v1\nkind: Deployment\n..."></textarea>
+            <button id="checkManifestBtn" class="btn-primary mt-3">Check manifest</button>
+            <div id="manifestResults" class="mt-4 space-y-2"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>Provider version reference</h2><p>Snapshot dated 2026-09-24. Always verify before an upgrade.</p></div></div>
+          <div id="providerVersions" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+        </div>
+      </section>
+
+      <section id="panel-upgrades" class="tab-panel space-y-5">
+        <div class="card">
+          <div class="card-head"><div><h2>Upgrade planner</h2><p>Move one Kubernetes minor version at a time and validate before and after.</p></div><button data-open-dialog="upgradeInfo" class="link-btn">Why this order?</button></div>
+          <div id="upgradeSteps" class="grid gap-3 lg:grid-cols-2"></div>
+        </div>
+      </section>
+
+      <section id="panel-learn" class="tab-panel space-y-5">
+        <div class="card">
+          <div class="card-head"><div><h2>Kubernetes in middle-school language</h2><p>Simple analogies for the parts you see in this dashboard.</p></div></div>
+          <div id="learnCards" class="grid gap-3 md:grid-cols-2 xl:grid-cols-3"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div><h2>Official references</h2><p>Use vendor documentation as the final authority for versions and upgrades.</p></div></div>
+          <div id="referenceLinks" class="grid gap-2 md:grid-cols-2"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="helpDialog" class="dialog-box"><form method="dialog"><button class="dialog-close">✕</button><h2>How to use this dashboard</h2><div class="dialog-body"><p><strong>1.</strong> Log in to your Kubernetes provider using its normal CLI.</p><p><strong>2.</strong> Make sure <code>kubectl get nodes</code> works.</p><p><strong>3.</strong> Start this dashboard. It reads the same kubeconfig.</p><p><strong>4.</strong> Pick a context and namespace, then refresh.</p><p><strong>5.</strong> Write actions are off by default. Turn them on at server startup only when you intend to change the cluster.</p></div></form></dialog>
+  <dialog id="healthInfo" class="dialog-box"><form method="dialog"><button class="dialog-close">✕</button><h2>What “healthy” means here</h2><div class="dialog-body"><p>This prototype checks basic Kubernetes signals: ready nodes, deployment availability, pod phase/ready containers, and Warning events.</p><p>It is not a replacement for Prometheus, OpenTelemetry, cloud monitoring, alerting, or SLOs. Think of it as a fast operations console.</p></div></form></dialog>
+  <dialog id="upgradeInfo" class="dialog-box"><form method="dialog"><button class="dialog-close">✕</button><h2>Why upgrades have an order</h2><div class="dialog-body"><p>The API server is the “school office.” Other components talk to it. Kubernetes has specific version-skew rules, so changing pieces in the wrong order can create unsupported combinations.</p><p>Managed services such as EKS, GKE, AKS, OpenShift, and IBM Cloud also add their own supported-version windows and upgrade procedures.</p></div></form></dialog>
+  <dialog id="applyDialog" class="dialog-box max-w-4xl"><form method="dialog" id="applyForm"><button class="dialog-close">✕</button><h2>Apply Kubernetes YAML</h2><div class="dialog-body"><p class="text-sm">Use <strong>Diff</strong> first. Apply is available only when server write mode is enabled.</p><textarea id="applyYaml" class="input mono h-80" spellcheck="false">apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-example
+data:
+  message: "hello from Kube Control Dashboard"
+</textarea><div class="flex flex-wrap gap-2 mt-3"><button type="button" id="diffYamlBtn" class="btn-secondary">Diff</button><button type="button" id="applyYamlBtn" class="btn-primary">Apply</button><button value="cancel" class="btn-secondary">Close</button></div><pre id="applyOutput" class="mono mt-3 max-h-64 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">No diff/apply run yet.</pre></div></form></dialog>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

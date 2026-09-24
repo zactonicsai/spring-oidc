@@ -1,0 +1,12 @@
+OIDC demo web app installed.
+
+Local lab:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "oidc-webapp.fullname" . }} 8088:{{ .Values.service.port }}
+
+Then open:
+  {{ .Values.oidc.redirectUri }}
+
+OIDC issuer:
+  {{ .Values.oidc.issuer }}
+
+The Keycloak client must allow the exact redirect URI/origin used by this browser app.

@@ -1,0 +1,158 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oidc-webapp.fullname" . }}-html
+  labels:
+    app.kubernetes.io/name: {{ include "oidc-webapp.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+data:
+  index.html: |-
+    <!doctype html>
+    <html lang="en">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>Kubernetes OIDC Demo</title>
+      <style>
+        :root { font-family: Arial, sans-serif; color-scheme: light dark; }
+        body { margin: 0; background: #f4f4f4; color: #161616; }
+        main { max-width: 820px; margin: 48px auto; padding: 24px; }
+        .card { background: white; border: 1px solid #dcdcdc; padding: 24px; box-shadow: 0 4px 18px rgba(0,0,0,.08); }
+        h1 { color: #001141; }
+        button { background: #0f62fe; color: white; border: 0; padding: 10px 16px; margin-right: 8px; cursor: pointer; }
+        button.secondary { background: #393939; }
+        pre { background: #161616; color: #f4f4f4; padding: 16px; overflow: auto; min-height: 140px; }
+        .muted { color: #525252; }
+        @media (prefers-color-scheme: dark) {
+          body { background: #161616; color: #f4f4f4; }
+          .card { background: #262626; border-color: #525252; }
+          h1 { color: #78a9ff; }
+          .muted { color: #c6c6c6; }
+        }
+      </style>
+    </head>
+    <body>
+      <main>
+        <section class="card">
+          <h1>Kubernetes OIDC Demo</h1>
+          <p class="muted">Authorization Code flow with PKCE. Tokens stay in page memory and are not written to localStorage.</p>
+          <p><strong>Issuer:</strong> <span id="issuer"></span></p>
+          <p><strong>Client:</strong> <span id="client"></span></p>
+          <p><strong>Status:</strong> <span id="status">Not signed in</span></p>
+          <p>
+            <button id="login">Sign in with Keycloak</button>
+            <button id="logout" class="secondary" disabled>Sign out</button>
+          </p>
+          <h2>ID token claims</h2>
+          <pre id="claims">No token yet.</pre>
+        </section>
+      </main>
+      <script>
+        const config = {
+          issuer: {{ .Values.oidc.issuer | quote }},
+          clientId: {{ .Values.oidc.clientId | quote }},
+          redirectUri: {{ .Values.oidc.redirectUri | quote }},
+          postLogoutRedirectUri: {{ .Values.oidc.postLogoutRedirectUri | quote }},
+          scopes: {{ .Values.oidc.scopes | quote }}
+        };
+
+        let tokens = null;
+        const $ = (id) => document.getElementById(id);
+        $('issuer').textContent = config.issuer;
+        $('client').textContent = config.clientId;
+
+        const base64url = (bytes) => btoa(String.fromCharCode(...bytes))
+          .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+
+        function randomString(size = 32) {
+          const bytes = new Uint8Array(size);
+          crypto.getRandomValues(bytes);
+          return base64url(bytes);
+        }
+
+        async function sha256Base64url(text) {
+          const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+          return base64url(new Uint8Array(digest));
+        }
+
+        function decodeJwt(jwt) {
+          const part = jwt.split('.')[1];
+          const normalized = part.replace(/-/g, '+').replace(/_/g, '/');
+          const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
+          return JSON.parse(decodeURIComponent(Array.from(atob(padded), c =>
+            '%' + c.charCodeAt(0).toString(16).padStart(2, '0')).join('')));
+        }
+
+        async function login() {
+          const verifier = randomString(48);
+          const challenge = await sha256Base64url(verifier);
+          const state = randomString(24);
+          sessionStorage.setItem('oidc.pkce.verifier', verifier);
+          sessionStorage.setItem('oidc.state', state);
+
+          const url = new URL(config.issuer + '/protocol/openid-connect/auth');
+          url.searchParams.set('client_id', config.clientId);
+          url.searchParams.set('redirect_uri', config.redirectUri);
+          url.searchParams.set('response_type', 'code');
+          url.searchParams.set('scope', config.scopes);
+          url.searchParams.set('state', state);
+          url.searchParams.set('code_challenge', challenge);
+          url.searchParams.set('code_challenge_method', 'S256');
+          location.assign(url.toString());
+        }
+
+        async function finishCallback() {
+          const params = new URLSearchParams(location.search);
+          const code = params.get('code');
+          if (!code) return;
+
+          const returnedState = params.get('state');
+          const expectedState = sessionStorage.getItem('oidc.state');
+          const verifier = sessionStorage.getItem('oidc.pkce.verifier');
+          sessionStorage.removeItem('oidc.state');
+          sessionStorage.removeItem('oidc.pkce.verifier');
+
+          if (!expectedState || returnedState !== expectedState || !verifier) {
+            throw new Error('OIDC state/PKCE validation failed. Start the login again.');
+          }
+
+          const body = new URLSearchParams({
+            grant_type: 'authorization_code',
+            client_id: config.clientId,
+            code,
+            redirect_uri: config.redirectUri,
+            code_verifier: verifier
+          });
+
+          const response = await fetch(config.issuer + '/protocol/openid-connect/token', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body
+          });
+          if (!response.ok) throw new Error('Token exchange failed: HTTP ' + response.status);
+          tokens = await response.json();
+          history.replaceState({}, document.title, new URL(config.redirectUri).pathname || '/');
+          const claims = decodeJwt(tokens.id_token);
+          $('status').textContent = 'Signed in as ' + (claims.preferred_username || claims.email || claims.sub);
+          $('claims').textContent = JSON.stringify(claims, null, 2);
+          $('logout').disabled = false;
+        }
+
+        function logout() {
+          if (!tokens?.id_token) return;
+          const url = new URL(config.issuer + '/protocol/openid-connect/logout');
+          url.searchParams.set('id_token_hint', tokens.id_token);
+          url.searchParams.set('post_logout_redirect_uri', config.postLogoutRedirectUri);
+          tokens = null;
+          location.assign(url.toString());
+        }
+
+        $('login').addEventListener('click', login);
+        $('logout').addEventListener('click', logout);
+        finishCallback().catch(err => {
+          $('status').textContent = 'Error';
+          $('claims').textContent = err.message;
+        });
+      </script>
+    </body>
+    </html>

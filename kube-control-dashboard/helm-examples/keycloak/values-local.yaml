@@ -1,0 +1,30 @@
+# LOCAL LAB ONLY.
+# This keeps the example small and easy to run with kubectl port-forward.
+
+auth:
+  adminUser: admin
+  existingSecret: keycloak-admin
+  passwordSecretKey: admin-password
+
+production: false
+httpEnabled: true
+replicaCount: 1
+
+# One replica can use local cache for a simple lab.
+cache:
+  enabled: false
+
+# Makes Keycloak metrics available from its metrics service.
+metrics:
+  enabled: true
+
+# Use port-forward for the local tutorial.
+ingress:
+  enabled: false
+
+# Keep the lab smaller. For production, define real requests/limits.
+resourcesPreset: nano
+
+# Easier for a broad set of local labs. Tighten this for real environments.
+networkPolicy:
+  enabled: false

@@ -1,0 +1,65 @@
+# EXAMPLE ONLY: review every value for your provider, ingress controller,
+# TLS setup, external database, DNS, and security requirements.
+
+auth:
+  adminUser: admin
+  existingSecret: keycloak-admin
+  passwordSecretKey: admin-password
+
+production: true
+replicaCount: 2
+
+# HTTPS terminates at the ingress in this example and traffic is forwarded
+# to Keycloak over HTTP inside the cluster. X-Forwarded-* headers tell
+# Keycloak the original public scheme/host.
+proxyHeaders: xforwarded
+hostnameStrict: true
+httpEnabled: true
+
+cache:
+  enabled: true
+  stack: jdbc-ping
+
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: false
+
+# Prefer a managed PostgreSQL service for many production environments.
+postgresql:
+  enabled: false
+
+externalDatabase:
+  host: REPLACE-ME.postgres.example.com
+  port: 5432
+  user: keycloak
+  database: keycloak
+  schema: public
+  existingSecret: keycloak-db
+  existingSecretPasswordKey: password
+
+# Example: ingress controller terminates TLS.
+ingress:
+  enabled: true
+  ingressClassName: nginx
+  hostname: keycloak.example.com
+  path: /
+  tls: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+# Set real numbers after measuring your workload.
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+pdb:
+  create: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: true

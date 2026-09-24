@@ -1,0 +1,33 @@
+replicaCount: 1
+
+image:
+  repository: nginx
+  tag: "1.29-alpine"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+oidc:
+  issuer: "http://localhost:8080/realms/k8s-demo"
+  clientId: "k8s-webapp"
+  redirectUri: "http://localhost:8088/"
+  postLogoutRedirectUri: "http://localhost:8088/"
+  scopes: "openid profile email"
+
+ingress:
+  enabled: false
+  className: ""
+  host: webapp.example.com
+  tls: false
+  tlsSecretName: ""
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi

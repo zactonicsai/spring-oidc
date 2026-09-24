@@ -1,0 +1,6 @@
+apiVersion: v2
+name: oidc-webapp
+description: Small Nginx-hosted OIDC Authorization Code + PKCE demo for Keycloak
+type: application
+version: 0.1.0
+appVersion: "1.0"
