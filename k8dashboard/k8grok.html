@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en" class="light" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>K8 Control Deck — Kubernetes API Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            ibm: {
+              blue: "#0f62fe",
+              "blue-hover": "#0043ce",
+              "blue-dark": "#001d6c",
+              ink: "#161616",
+              muted: "#525252",
+              line: "#e0e0e0",
+              wash: "#f4f4f4",
+              warn: "#f1c21b",
+              danger: "#da1e28",
+              ok: "#198038"
+            }
+          },
+          fontFamily: {
+            sans: ["IBM Plex Sans", "Inter", "system-ui", "sans-serif"],
+            mono: ["IBM Plex Mono", "ui-monospace", "SFMono-Regular", "monospace"]
+          }
+        }
+      }
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root { --base-font: 16px; }
+    html { font-size: var(--base-font); }
+    body { font-family: "IBM Plex Sans", system-ui, sans-serif; }
+    .scrollbar-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: #8d8d8d; border-radius: 0; }
+    .ibm-btn { border-radius: 0; }
+    .pulse-dot { animation: pulse 2s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: .45; }
+    }
+    pre, code { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+    .modal-open { overflow: hidden; }
+  </style>
+</head>
+<body class="bg-white text-ibm-ink dark:bg-[#161616] dark:text-gray-100 min-h-screen">
+  <!-- Top bar -->
+  <header class="sticky top-0 z-40 border-b border-ibm-line dark:border-neutral-700 bg-white dark:bg-[#161616]">
+    <div class="max-w-[1600px] mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 bg-ibm-blue flex items-center justify-center text-white font-bold shrink-0">K8</div>
+        <div class="min-w-0">
+          <h1 class="text-lg sm:text-xl font-semibold text-ibm-blue-dark dark:text-white truncate">K8 Control Deck</h1>
+          <p class="text-xs text-ibm-muted dark:text-neutral-400 truncate">Kubernetes API dashboard · monitor · configure · learn</p>
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 ml-auto">
+        <span id="connBadge" class="text-xs px-2 py-1 border border-ibm-line dark:border-neutral-600">Disconnected</span>
+        <label class="text-xs text-ibm-muted hidden sm:inline">Font</label>
+        <input id="fontRange" type="range" min="14" max="36" value="16" class="w-24 accent-[#0f62fe]" aria-label="Font size from 14 to 36" />
+        <span id="fontLabel" class="text-xs w-8">16px</span>
+        <button id="themeBtn" class="ibm-btn px-3 py-1.5 text-sm border border-ibm-ink dark:border-white hover:bg-ibm-wash dark:hover:bg-neutral-800" type="button">Dark</button>
+        <button data-modal="help" class="ibm-btn px-3 py-1.5 text-sm bg-ibm-blue text-white hover:bg-ibm-blue-hover" type="button">How this works</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="max-w-[1600px] mx-auto px-4 py-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
+    <!-- Sidebar -->
+    <aside class="lg:col-span-3 space-y-4">
+      <section class="border border-ibm-line dark:border-neutral-700 bg-white dark:bg-[#1e1e1e] p-4">
+        <h2 class="font-semibold text-ibm-blue-dark dark:text-white mb-1">1. Connect to a cluster</h2>
+        <p class="text-sm text-ibm-muted dark:text-neutral-400 mb-3">Pick where Kubernetes is hosted, then connect. This deck talks to the Kubernetes API the same way <code class="text-xs">kubectl</code> does.</p>
+        <label class="block text-xs font-medium mb-1">Hosting platform</label>
+        <select id="provider" class="w-full border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-2 text-sm mb-3">
+          <option value="demo">Demo cluster (safe practice mode)</option>
+          <option value="docker">Local Docker Desktop / kind / minikube</option>
+          <option value="eks">Amazon EKS</option>
+          <option value="gke">Google GKE (GCP)</option>
+          <option value="aks">Microsoft AKS</option>
+          <option value="openshift">Red Hat OpenShift</option>
+          <option value="ibm">IBM Cloud Kubernetes / ROKS</option>
+          <option value="rancher">Rancher / RKE2</option>
+          <option value="custom">Custom API endpoint</option>
+        </select>
+        <label class="block text-xs font-medium mb-1">API server URL</label>
+        <input id="apiUrl" type="url" placeholder="https://127.0.0.1:6443" class="w-full border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-2 text-sm mb-3" />
+        <label class="block text-xs font-medium mb-1">Auth token or kubeconfig note</label>
+        <input id="token" type="password" placeholder="Bearer token (never stored on a server)" class="w-full border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-2 text-sm mb-3" />
+        <label class="block text-xs font-medium mb-1">Cluster Kubernetes version</label>
+        <select id="k8sVersion" class="w-full border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-2 text-sm mb-3">
+          <option value="1.37">1.37.1 — current standard (Garhwal)</option>
+          <option value="1.36">1.36.5 — prior supported</option>
+          <option value="1.35">1.35.9 — prior supported</option>
+          <option value="1.34">1.34.12 — maintenance only</option>
+          <option value="1.33">1.33.13 — end of life</option>
+        </select>
+        <div class="flex gap-2">
+          <button id="connectBtn" class="ibm-btn flex-1 bg-ibm-blue text-white px-3 py-2 text-sm hover:bg-ibm-blue-hover">Connect</button>
+          <button id="disconnectBtn" class="ibm-btn px-3 py-2 text-sm border border-ibm-ink dark:border-white">Disconnect</button>
+        </div>
+        <p id="connectMsg" class="text-xs mt-2 text-ibm-muted"></p>
+        <button data-modal="connectHelp" class="text-xs text-ibm-blue underline mt-2">Why browsers cannot always talk to a real API</button>
+      </section>
+
+      <section class="border border-ibm-line dark:border-neutral-700 bg-ibm-wash dark:bg-[#1e1e1e] p-4">
+        <h2 class="font-semibold text-ibm-blue-dark dark:text-white mb-2">Quick picture</h2>
+        <p class="text-sm mb-2">Think of Kubernetes as a busy school:</p>
+        <ul class="text-sm space-y-1 list-disc pl-4">
+          <li><strong>Control plane</strong> = the principal’s office (makes the rules).</li>
+          <li><strong>Nodes</strong> = classrooms (the computers).</li>
+          <li><strong>Pods</strong> = students sitting at desks (running apps).</li>
+          <li><strong>Deployments</strong> = class lists that say “keep 3 students here.”</li>
+          <li><strong>Services</strong> = the hallway signs that help people find a class.</li>
+        </ul>
+        <button data-modal="learnArch" class="mt-3 text-sm text-ibm-blue underline">Open the full picture</button>
+      </section>
+
+      <nav class="border border-ibm-line dark:border-neutral-700 p-2 bg-white dark:bg-[#1e1e1e]">
+        <p class="text-xs uppercase tracking-wide text-ibm-muted px-2 py-1">Jump</p>
+        <div class="grid grid-cols-2 gap-1 text-sm">
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#overview">Overview</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#control">Control plane</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#nodes">Nodes</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#pods">Pods</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#deploy">Deployments</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#svc">Services</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#logs">Logs</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#cmd">Commands</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#helm">Helm &amp; versions</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#upgrade">Upgrades</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#learn">Learn</a>
+          <a class="px-2 py-1 hover:bg-ibm-wash dark:hover:bg-neutral-800" href="#docs">Official docs</a>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Main -->
+    <main class="lg:col-span-9 space-y-4">
+      <!-- Overview cards -->
+      <section id="overview" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <div class="flex flex-wrap items-end justify-between gap-2 mb-3">
+          <div>
+            <h2 class="text-xl font-semibold text-ibm-blue-dark dark:text-white">Cluster status</h2>
+            <p id="clusterTitle" class="text-sm text-ibm-muted">Not connected — choose a host and press Connect.</p>
+          </div>
+          <button id="refreshBtn" class="ibm-btn border border-ibm-ink dark:border-white px-3 py-1.5 text-sm">Refresh</button>
+        </div>
+        <div id="statGrid" class="grid grid-cols-2 md:grid-cols-5 gap-3"></div>
+      </section>
+
+      <!-- Control plane -->
+      <section id="control" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white">Control plane</h2>
+          <button data-modal="learnControl" class="text-sm text-ibm-blue underline">What is this?</button>
+        </div>
+        <p class="text-sm text-ibm-muted dark:text-neutral-400 mb-3">The control plane is the brain. It stores the desired state and tells worker nodes what to run.</p>
+        <div class="overflow-x-auto scrollbar-thin">
+          <table class="w-full text-sm text-left min-w-[640px]">
+            <thead class="bg-ibm-wash dark:bg-neutral-800 text-ibm-blue-dark dark:text-white">
+              <tr>
+                <th class="p-2 font-medium">Component</th>
+                <th class="p-2 font-medium">Simple job</th>
+                <th class="p-2 font-medium">Status</th>
+                <th class="p-2 font-medium">Version</th>
+                <th class="p-2 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody id="cpBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Nodes -->
+      <section id="nodes" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white">Nodes</h2>
+          <button data-modal="learnNodes" class="text-sm text-ibm-blue underline">What is a node?</button>
+        </div>
+        <div class="overflow-x-auto scrollbar-thin">
+          <table class="w-full text-sm text-left min-w-[700px]">
+            <thead class="bg-ibm-wash dark:bg-neutral-800 text-ibm-blue-dark dark:text-white">
+              <tr>
+                <th class="p-2 font-medium">Name</th>
+                <th class="p-2 font-medium">Role</th>
+                <th class="p-2 font-medium">Status</th>
+                <th class="p-2 font-medium">Kubelet</th>
+                <th class="p-2 font-medium">CPU / Mem</th>
+                <th class="p-2 font-medium">Pods</th>
+              </tr>
+            </thead>
+            <tbody id="nodeBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Pods -->
+      <section id="pods" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white">Pods</h2>
+          <div class="flex gap-2">
+            <input id="podFilter" placeholder="Filter by name or namespace" class="border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-1 text-sm" />
+            <button data-modal="learnPods" class="text-sm text-ibm-blue underline">What is a pod?</button>
+          </div>
+        </div>
+        <div class="overflow-x-auto scrollbar-thin max-h-80">
+          <table class="w-full text-sm text-left min-w-[760px]">
+            <thead class="bg-ibm-wash dark:bg-neutral-800 text-ibm-blue-dark dark:text-white sticky top-0">
+              <tr>
+                <th class="p-2 font-medium">Name</th>
+                <th class="p-2 font-medium">Namespace</th>
+                <th class="p-2 font-medium">Status</th>
+                <th class="p-2 font-medium">Restarts</th>
+                <th class="p-2 font-medium">Node</th>
+                <th class="p-2 font-medium">Age</th>
+                <th class="p-2 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="podBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Deployments -->
+      <section id="deploy" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white">Deployments</h2>
+          <button id="addDeployBtn" class="ibm-btn bg-ibm-blue text-white px-3 py-1.5 text-sm hover:bg-ibm-blue-hover">Add deployment</button>
+        </div>
+        <p class="text-sm text-ibm-muted dark:text-neutral-400 mb-3">A Deployment is a promise: “always keep this many copies of my app running.”</p>
+        <div class="overflow-x-auto scrollbar-thin">
+          <table class="w-full text-sm text-left min-w-[700px]">
+            <thead class="bg-ibm-wash dark:bg-neutral-800 text-ibm-blue-dark dark:text-white">
+              <tr>
+                <th class="p-2 font-medium">Name</th>
+                <th class="p-2 font-medium">Namespace</th>
+                <th class="p-2 font-medium">Ready</th>
+                <th class="p-2 font-medium">Image</th>
+                <th class="p-2 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="deployBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Services -->
+      <section id="svc" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <div class="flex items-center justify-between gap-2 mb-2">
+          <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white">Services</h2>
+          <button data-modal="learnSvc" class="text-sm text-ibm-blue underline">What is a Service?</button>
+        </div>
+        <div class="overflow-x-auto scrollbar-thin">
+          <table class="w-full text-sm text-left min-w-[640px]">
+            <thead class="bg-ibm-wash dark:bg-neutral-800 text-ibm-blue-dark dark:text-white">
+              <tr>
+                <th class="p-2 font-medium">Name</th>
+                <th class="p-2 font-medium">Type</th>
+                <th class="p-2 font-medium">Cluster IP</th>
+                <th class="p-2 font-medium">Ports</th>
+                <th class="p-2 font-medium">Selector</th>
+              </tr>
+            </thead>
+            <tbody id="svcBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Logs -->
+      <section id="logs" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white mb-2">Pull logs</h2>
+        <p class="text-sm text-ibm-muted dark:text-neutral-400 mb-3">Logs are the diary of a container. Real clusters use <code>GET /api/v1/namespaces/{ns}/pods/{name}/log</code>.</p>
+        <div class="flex flex-wrap gap-2 mb-3">
+          <select id="logPod" class="border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-2 text-sm min-w-[220px]"></select>
+          <label class="flex items-center gap-1 text-sm"><input id="logFollow" type="checkbox" /> Follow</label>
+          <button id="logBtn" class="ibm-btn bg-ibm-blue text-white px-3 py-2 text-sm">Get logs</button>
+          <button id="logClear" class="ibm-btn border border-ibm-ink dark:border-white px-3 py-2 text-sm">Clear</button>
+        </div>
+        <pre id="logBox" class="bg-[#161616] text-green-300 p-3 text-xs overflow-auto h-56 scrollbar-thin">Connect a cluster, pick a pod, then press Get logs.</pre>
+      </section>
+
+      <!-- Commands -->
+      <section id="cmd" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white mb-2">Command console</h2>
+        <p class="text-sm text-ibm-muted dark:text-neutral-400 mb-3">Type familiar kubectl-style commands. In demo mode they run against the in-browser cluster. On a real cluster you would send the matching API call.</p>
+        <div class="flex flex-wrap gap-1 mb-2 text-xs">
+          <button class="cmd-chip border border-ibm-line px-2 py-1 dark:border-neutral-600" data-cmd="kubectl get nodes">get nodes</button>
+          <button class="cmd-chip border border-ibm-line px-2 py-1 dark:border-neutral-600" data-cmd="kubectl get pods -A">get pods -A</button>
+          <button class="cmd-chip border border-ibm-line px-2 py-1 dark:border-neutral-600" data-cmd="kubectl get deploy -A">get deploy</button>
+          <button class="cmd-chip border border-ibm-line px-2 py-1 dark:border-neutral-600" data-cmd="kubectl get svc -A">get svc</button>
+          <button class="cmd-chip border border-ibm-line px-2 py-1 dark:border-neutral-600" data-cmd="kubectl scale deploy/web --replicas=3 -n apps">scale web</button>
+          <button class="cmd-chip border border-ibm-line px-2 py-1 dark:border-neutral-600" data-cmd="help">help</button>
+        </div>
+        <div class="flex gap-2 mb-2">
+          <input id="cmdInput" class="flex-1 border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-2 font-mono text-sm" placeholder="kubectl get pods -A" />
+          <button id="cmdRun" class="ibm-btn bg-ibm-blue text-white px-4 py-2 text-sm">Run</button>
+        </div>
+        <pre id="cmdOut" class="bg-[#161616] text-gray-100 p-3 text-xs overflow-auto h-48 scrollbar-thin font-mono">Ready. Type help and press Run.</pre>
+      </section>
+
+      <!-- Helm + versions -->
+      <section id="helm" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white mb-2">Helm and config version conflicts</h2>
+        <p class="text-sm text-ibm-muted dark:text-neutral-400 mb-3">Helm is a package manager for Kubernetes (like an app store). Helm 3 is compatible with the Kubernetes version it was built for, plus three older minors (n−3).</p>
+        <div class="grid md:grid-cols-3 gap-3 mb-3">
+          <div>
+            <label class="text-xs font-medium">Cluster version</label>
+            <select id="helmK8s" class="w-full border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-2 text-sm">
+              <option>1.37</option><option>1.36</option><option>1.35</option><option>1.34</option><option>1.33</option><option>1.32</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs font-medium">Helm version</label>
+            <select id="helmVer" class="w-full border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-2 text-sm">
+              <option>3.22</option><option>3.21</option><option>3.20</option><option>3.19</option><option>3.18</option><option>3.17</option><option>2.17</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs font-medium">kubectl version</label>
+            <select id="kubectlVer" class="w-full border border-ibm-line dark:border-neutral-600 bg-white dark:bg-[#161616] px-2 py-2 text-sm">
+              <option>1.37</option><option>1.36</option><option>1.35</option><option>1.34</option><option>1.33</option>
+            </select>
+          </div>
+        </div>
+        <button id="checkSkew" class="ibm-btn bg-ibm-blue text-white px-3 py-2 text-sm mb-3">Check conflicts</button>
+        <div id="skewResult" class="text-sm border border-ibm-line dark:border-neutral-700 p-3 bg-ibm-wash dark:bg-neutral-900"></div>
+        <p class="text-xs mt-2">Sources: <a class="text-ibm-blue underline" href="https://helm.sh/docs/topics/version_skew/" target="_blank" rel="noopener">Helm version skew</a> · <a class="text-ibm-blue underline" href="https://kubernetes.io/releases/version-skew-policy/" target="_blank" rel="noopener">Kubernetes version skew policy</a></p>
+      </section>
+
+      <!-- Upgrades -->
+      <section id="upgrade" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white mb-2">Releases, prior versions, and upgrades</h2>
+        <p class="text-sm mb-3">Kubernetes keeps the newest three minor versions in official support (N, N−1, N−2). You must upgrade one minor at a time. You cannot jump from 1.35 straight to 1.37.</p>
+        <div class="overflow-x-auto scrollbar-thin mb-3">
+          <table class="w-full text-sm min-w-[680px]">
+            <thead class="bg-ibm-wash dark:bg-neutral-800">
+              <tr>
+                <th class="p-2 text-left">Version</th>
+                <th class="p-2 text-left">Status (Sep 2026)</th>
+                <th class="p-2 text-left">Latest patch</th>
+                <th class="p-2 text-left">End of life</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t border-ibm-line dark:border-neutral-700"><td class="p-2">1.37 Garhwal</td><td class="p-2">Current standard</td><td class="p-2">1.37.1</td><td class="p-2">28 Oct 2027</td></tr>
+              <tr class="border-t border-ibm-line dark:border-neutral-700"><td class="p-2">1.36</td><td class="p-2">Supported prior</td><td class="p-2">1.36.5</td><td class="p-2">28 Jun 2027</td></tr>
+              <tr class="border-t border-ibm-line dark:border-neutral-700"><td class="p-2">1.35</td><td class="p-2">Supported prior</td><td class="p-2">1.35.9</td><td class="p-2">28 Feb 2027</td></tr>
+              <tr class="border-t border-ibm-line dark:border-neutral-700"><td class="p-2">1.34</td><td class="p-2">Maintenance</td><td class="p-2">1.34.12</td><td class="p-2">27 Oct 2026</td></tr>
+              <tr class="border-t border-ibm-line dark:border-neutral-700"><td class="p-2">1.33 and older</td><td class="p-2">End of life</td><td class="p-2">final patches only</td><td class="p-2">already ended</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ol class="list-decimal pl-5 text-sm space-y-1 mb-3">
+          <li>Read the release notes for the next minor version.</li>
+          <li>Upgrade the control plane first (API server, then controller-manager and scheduler).</li>
+          <li>Upgrade extra control-plane nodes if you have them.</li>
+          <li>Upgrade worker node kubelets last. Kubelet may be up to three minors older than the API server, but never newer.</li>
+          <li>Check add-ons: CNI, CSI, Ingress, Helm charts, and operators.</li>
+        </ol>
+        <div class="flex flex-wrap gap-2">
+          <button id="planUpgrade" class="ibm-btn bg-ibm-blue text-white px-3 py-2 text-sm">Plan upgrade from selected cluster</button>
+          <a class="ibm-btn border border-ibm-ink dark:border-white px-3 py-2 text-sm inline-block" href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/" target="_blank" rel="noopener">Official upgrade guide</a>
+        </div>
+        <pre id="upgradePlan" class="mt-3 bg-ibm-wash dark:bg-neutral-900 p-3 text-xs whitespace-pre-wrap hidden"></pre>
+      </section>
+
+      <!-- Learn -->
+      <section id="learn" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white mb-2">Learn Kubernetes — middle-school walkthrough</h2>
+        <div class="space-y-3 text-sm leading-relaxed">
+          <p>Imagine you run a pizza shop that suddenly gets famous. One oven is not enough. You hire more cooks (containers), put them in kitchens (nodes), and hire a manager (the control plane) who watches the orders and says “we need two more pepperoni pizzas.” That manager is Kubernetes.</p>
+          <p><strong>Step 1 — Desired state.</strong> You write a file that says “I want 3 copies of my website.” Kubernetes stores that wish.</p>
+          <p><strong>Step 2 — The API server hears you.</strong> Every tool, including this dashboard, talks to one front door called the API server.</p>
+          <p><strong>Step 3 — Controllers compare wish vs reality.</strong> If only 2 copies are running, a Deployment controller starts a third Pod.</p>
+          <p><strong>Step 4 — The scheduler picks a classroom.</strong> It looks at CPU and memory and places the new Pod on a Node that has room.</p>
+          <p><strong>Step 5 — kubelet does the local work.</strong> On that Node, kubelet asks the container runtime (often containerd, sometimes Docker) to start the container.</p>
+          <p><strong>Step 6 — A Service gives a stable name.</strong> Pods die and come back with new IPs. A Service is a permanent phone number that always points at healthy Pods.</p>
+          <p><strong>Step 7 — You watch logs and metrics.</strong> When something breaks, logs tell the story. This dashboard’s Logs panel is that diary.</p>
+        </div>
+        <div class="grid sm:grid-cols-2 gap-2 mt-3">
+          <button data-modal="learnArch" class="text-left border border-ibm-line dark:border-neutral-600 p-3 text-sm hover:bg-ibm-wash dark:hover:bg-neutral-800">Architecture popup</button>
+          <button data-modal="learnYaml" class="text-left border border-ibm-line dark:border-neutral-600 p-3 text-sm hover:bg-ibm-wash dark:hover:bg-neutral-800">What a YAML file looks like</button>
+          <button data-modal="learnSafety" class="text-left border border-ibm-line dark:border-neutral-600 p-3 text-sm hover:bg-ibm-wash dark:hover:bg-neutral-800">Safety rules for real clusters</button>
+          <button data-modal="learnProviders" class="text-left border border-ibm-line dark:border-neutral-600 p-3 text-sm hover:bg-ibm-wash dark:hover:bg-neutral-800">How EKS, GKE, AKS, OpenShift, IBM differ</button>
+        </div>
+      </section>
+
+      <!-- Docs -->
+      <section id="docs" class="border border-ibm-line dark:border-neutral-700 p-4 bg-white dark:bg-[#1e1e1e]">
+        <h2 class="text-lg font-semibold text-ibm-blue-dark dark:text-white mb-3">Official docs and references</h2>
+        <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 text-sm">
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://kubernetes.io/docs/home/" target="_blank" rel="noopener"><strong>Kubernetes docs</strong><br /><span class="text-ibm-muted">Home for every concept</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://kubernetes.io/docs/concepts/architecture/" target="_blank" rel="noopener"><strong>Cluster architecture</strong><br /><span class="text-ibm-muted">Control plane and nodes</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://kubernetes.io/docs/reference/kubernetes-api/" target="_blank" rel="noopener"><strong>Kubernetes API</strong><br /><span class="text-ibm-muted">The real HTTP API</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://kubernetes.io/releases/" target="_blank" rel="noopener"><strong>Releases</strong><br /><span class="text-ibm-muted">1.37 current standard</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://kubernetes.io/releases/version-skew-policy/" target="_blank" rel="noopener"><strong>Version skew</strong><br /><span class="text-ibm-muted">What versions can talk</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://helm.sh/docs/" target="_blank" rel="noopener"><strong>Helm docs</strong><br /><span class="text-ibm-muted">Charts and releases</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://docs.aws.amazon.com/eks/" target="_blank" rel="noopener"><strong>Amazon EKS</strong><br /><span class="text-ibm-muted">AWS managed Kubernetes</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://cloud.google.com/kubernetes-engine/docs" target="_blank" rel="noopener"><strong>Google GKE</strong><br /><span class="text-ibm-muted">GCP managed Kubernetes</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://learn.microsoft.com/azure/aks/" target="_blank" rel="noopener"><strong>Azure AKS</strong><br /><span class="text-ibm-muted">Azure managed Kubernetes</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://docs.redhat.com/en/documentation/openshift_container_platform/" target="_blank" rel="noopener"><strong>Red Hat OpenShift</strong><br /><span class="text-ibm-muted">Enterprise Kubernetes</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://cloud.ibm.com/docs/containers" target="_blank" rel="noopener"><strong>IBM Cloud Kubernetes</strong><br /><span class="text-ibm-muted">IKS and ROKS</span></a>
+          <a class="border border-ibm-line dark:border-neutral-600 p-3 hover:border-ibm-blue" href="https://kind.sigs.k8s.io/" target="_blank" rel="noopener"><strong>kind / local</strong><br /><span class="text-ibm-muted">Kubernetes in Docker</span></a>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="border-t border-ibm-line dark:border-neutral-700 mt-6 py-4 text-center text-xs text-ibm-muted">
+    K8 Control Deck · educational control surface · Kubernetes trademarks belong to the Linux Foundation · Design inspired by IBM Carbon (white canvas, IBM Blue #0f62fe, ink #161616)
+  </footer>
+
+  <!-- Modals -->
+  <div id="modalRoot" class="fixed inset-0 z-50 hidden">
+    <div id="modalBackdrop" class="absolute inset-0 bg-black/50"></div>
+    <div class="relative max-w-2xl mx-auto mt-16 mb-8 bg-white dark:bg-[#1e1e1e] border border-ibm-line dark:border-neutral-600 max-h-[80vh] overflow-auto p-5 mx-4">
+      <div class="flex justify-between items-start gap-3 mb-3">
+        <h3 id="modalTitle" class="text-lg font-semibold text-ibm-blue-dark dark:text-white"></h3>
+        <button id="modalClose" class="text-xl leading-none px-2" aria-label="Close">×</button>
+      </div>
+      <div id="modalBody" class="text-sm space-y-2 leading-relaxed"></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = {
+      connected: false,
+      provider: "demo",
+      version: "1.37",
+      apiUrl: "",
+      followLogs: false,
+      followTimer: null,
+      cluster: null
+    };
+
+    const PROVIDERS = {
+      demo: { name: "Demo cluster", api: "https://demo.local:6443", nodes: 3, region: "training-lab" },
+      docker: { name: "Local Docker / kind / minikube", api: "https://127.0.0.1:6443", nodes: 1, region: "localhost" },
+      eks: { name: "Amazon EKS", api: "https://A1B2C3D4.gr7.us-east-1.eks.amazonaws.com", nodes: 4, region: "us-east-1" },
+      gke: { name: "Google GKE", api: "https://34.12.8.21", nodes: 3, region: "us-central1" },
+      aks: { name: "Azure AKS", api: "https://aks-prod-dns-a1b2.hcp.eastus.azmk8s.io", nodes: 3, region: "eastus" },
+      openshift: { name: "Red Hat OpenShift", api: "https://api.cluster.example.com:6443", nodes: 6, region: "on-prem / cloud" },
+      ibm: { name: "IBM Cloud Kubernetes / ROKS", api: "https://c1.us-south.containers.cloud.ibm.com", nodes: 3, region: "us-south" },
+      rancher: { name: "Rancher / RKE2", api: "https://rancher.example.com/k8s/clusters/c-m-demo", nodes: 4, region: "dc-1" },
+      custom: { name: "Custom API", api: "https://kubernetes.default.svc", nodes: 2, region: "user-defined" }
+    };
+
+    const HELM_SUPPORT = {
+      "3.22": ["1.37","1.36","1.35","1.34"],
+      "3.21": ["1.36","1.35","1.34","1.33"],
+      "3.20": ["1.35","1.34","1.33","1.32"],
+      "3.19": ["1.34","1.33","1.32","1.31"],
+      "3.18": ["1.33","1.32","1.31","1.30"],
+      "3.17": ["1.32","1.31","1.30","1.29"],
+      "2.17": []
+    };
+
+    function statusPill(s) {
+      const map = {
+        Ready: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        Healthy: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        Running: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        Active: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+        Pending: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100",
+        CrashLoopBackOff: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+        NotReady: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
+        Degraded: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100"
+      };
+      return `<span class="px-2 py-0.5 text-xs ${map[s] || "bg-gray-100"}">${s}</span>`;
+    }
+
+    function makeCluster(providerKey, version) {
+      const p = PROVIDERS[providerKey];
+      const ver = version + (version === "1.37" ? ".1" : version === "1.36" ? ".5" : version === "1.35" ? ".9" : version === "1.34" ? ".12" : ".13");
+      const nodeCount = p.nodes;
+      const nodes = [];
+      for (let i = 0; i < nodeCount; i++) {
+        const role = i === 0 && providerKey !== "eks" && providerKey !== "gke" && providerKey !== "aks" && providerKey !== "ibm"
+          ? (i === 0 ? "control-plane" : "worker")
+          : (providerKey === "openshift" && i < 3 ? "master" : "worker");
+        const managed = ["eks","gke","aks","ibm"].includes(providerKey);
+        nodes.push({
+          name: managed && role !== "worker" ? `managed-cp` : `${p.name.split(" ")[0].toLowerCase()}-node-${i}`,
+          role: managed && i === 0 ? "worker (control plane hidden)" : (i === 0 && !managed ? "control-plane" : "worker"),
+          status: i === nodeCount - 1 && providerKey === "rancher" ? "NotReady" : "Ready",
+          kubelet: ver,
+          cpu: `${(20 + i * 11) % 80}%`,
+          mem: `${(30 + i * 9) % 75}%`,
+          pods: 6 + i * 3
+        });
+      }
+      if (["eks","gke","aks","ibm"].includes(providerKey)) {
+        nodes[0].role = "worker";
+        nodes[0].name = `${providerKey}-worker-0`;
+      }
+      const pods = [
+        { name: "coredns-7b5c8d9f6-ab12c", ns: "kube-system", status: "Running", restarts: 0, node: nodes[0].name, age: "12d" },
+        { name: "coredns-7b5c8d9f6-xy98k", ns: "kube-system", status: "Running", restarts: 0, node: nodes[Math.min(1, nodes.length-1)].name, age: "12d" },
+        { name: "metrics-server-6d4c", ns: "kube-system", status: "Running", restarts: 1, node: nodes[0].name, age: "12d" },
+        { name: "web-6f8d9c4b7-111aa", ns: "apps", status: "Running", restarts: 0, node: nodes[0].name, age: "2d" },
+        { name: "web-6f8d9c4b7-222bb", ns: "apps", status: "Running", restarts: 0, node: nodes[Math.min(1, nodes.length-1)].name, age: "2d" },
+        { name: "api-5c7d8e9f0-333cc", ns: "apps", status: "Running", restarts: 2, node: nodes[0].name, age: "5d" },
+        { name: "worker-8a9b0c1d2-444dd", ns: "jobs", status: "Pending", restarts: 0, node: "-", age: "3m" },
+        { name: "payments-4e5f6a7b8-555ee", ns: "apps", status: "CrashLoopBackOff", restarts: 9, node: nodes[Math.min(1, nodes.length-1)].name, age: "1d" }
+      ];
+      if (providerKey === "openshift") {
+        pods.push({ name: "console-7d8e-xyz", ns: "openshift-console", status: "Running", restarts: 0, node: nodes[0].name, age: "20d" });
+      }
+      const deploys = [
+        { name: "web", ns: "apps", ready: "2/2", replicas: 2, image: "ghcr.io/demo/web:1.4.2" },
+        { name: "api", ns: "apps", ready: "1/1", replicas: 1, image: "ghcr.io/demo/api:2.0.1" },
+        { name: "payments", ns: "apps", ready: "0/1", replicas: 1, image: "ghcr.io/demo/pay:0.9.8" },
+        { name: "coredns", ns: "kube-system", ready: "2/2", replicas: 2, image: "registry.k8s.io/coredns/coredns:v1.12.1" }
+      ];
+      const svcs = [
+        { name: "kubernetes", type: "ClusterIP", ip: "10.96.0.1", ports: "443/TCP", selector: "apiserver" },
+        { name: "web", type: "LoadBalancer", ip: "10.96.10.12", ports: "80:30080/TCP", selector: "app=web" },
+        { name: "api", type: "ClusterIP", ip: "10.96.10.20", ports: "8080/TCP", selector: "app=api" },
+        { name: "kube-dns", type: "ClusterIP", ip: "10.96.0.10", ports: "53/UDP,53/TCP", selector: "k8s-app=kube-dns" }
+      ];
+      const cp = [
+        { name: "kube-apiserver", job: "Front door. Every request comes here.", status: "Healthy", version: ver },
+        { name: "etcd", job: "The cluster’s notebook. Stores all objects.", status: "Healthy", version: "3.5.x" },
+        { name: "kube-scheduler", job: "Picks which node gets each new Pod.", status: "Healthy", version: ver },
+        { name: "kube-controller-manager", job: "Keeps reality matching your wishes.", status: providerKey === "rancher" ? "Degraded" : "Healthy", version: ver },
+        { name: "cloud-controller-manager", job: "Talks to AWS/GCP/Azure/IBM load balancers.", status: ["docker","demo"].includes(providerKey) ? "Active" : "Healthy", version: ver }
+      ];
+      return { provider: p, version: ver, minor: version, nodes, pods, deploys, svcs, cp };
+    }
+
+    function render() {
+      const c = state.cluster;
+      const badge = $("connBadge");
+      if (!state.connected || !c) {
+        badge.textContent = "Disconnected";
+        badge.className = "text-xs px-2 py-1 border border-ibm-line dark:border-neutral-600";
+        $("clusterTitle").textContent = "Not connected — choose a host and press Connect.";
+        $("statGrid").innerHTML = "";
+        $("cpBody").innerHTML = "";
+        $("nodeBody").innerHTML = "";
+        $("podBody").innerHTML = "";
+        $("deployBody").innerHTML = "";
+        $("svcBody").innerHTML = "";
+        $("logPod").innerHTML = "";
+        return;
+      }
+      badge.textContent = "Connected · " + c.provider.name;
+      badge.className = "text-xs px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200";
+      $("clusterTitle").textContent = `${c.provider.name} · API ${state.apiUrl} · Kubernetes ${c.version} · ${c.provider.region}`;
+
+      const readyNodes = c.nodes.filter(n => n.status === "Ready").length;
+      const runningPods = c.pods.filter(p => p.status === "Running").length;
+      const readyDep = c.deploys.filter(d => d.ready.split("/")[0] === d.ready.split("/")[1]).length;
+      const cpOk = c.cp.every(x => x.status === "Healthy" || x.status === "Active");
+      const cards = [
+        ["Control plane", cpOk ? "Healthy" : "Degraded", cpOk],
+        ["Nodes", `${readyNodes}/${c.nodes.length} Ready`, readyNodes === c.nodes.length],
+        ["Pods", `${runningPods}/${c.pods.length} Running`, runningPods === c.pods.length],
+        ["Deployments", `${readyDep}/${c.deploys.length} Ready`, readyDep === c.deploys.length],
+        ["Services", `${c.svcs.length} published`, true]
+      ];
+      $("statGrid").innerHTML = cards.map(([t,v,ok]) => `
+        <div class="border ${ok ? "border-ibm-line dark:border-neutral-600" : "border-ibm-danger"} p-3">
+          <div class="text-xs text-ibm-muted">${t}</div>
+          <div class="font-semibold text-ibm-blue-dark dark:text-white mt-1">${v}</div>
+          <div class="mt-2 flex items-center gap-1 text-xs"><span class="w-2 h-2 rounded-full ${ok ? "bg-ibm-ok pulse-dot" : "bg-ibm-danger"}"></span>${ok ? "OK" : "Needs attention"}</div>
+        </div>`).join("");
+
+      $("cpBody").innerHTML = c.cp.map(x => `<tr class="border-t border-ibm-line dark:border-neutral-700">
+        <td class="p-2 font-medium">${x.name}</td><td class="p-2">${x.job}</td>
+        <td class="p-2">${statusPill(x.status)}</td><td class="p-2">${x.version}</td>
+        <td class="p-2"><button class="text-ibm-blue underline text-xs" data-modal="comp-${x.name}">Details</button></td>
+      </tr>`).join("");
+
+      $("nodeBody").innerHTML = c.nodes.map(n => `<tr class="border-t border-ibm-line dark:border-neutral-700">
+        <td class="p-2 font-mono text-xs">${n.name}</td><td class="p-2">${n.role}</td>
+        <td class="p-2">${statusPill(n.status)}</td><td class="p-2">${n.kubelet}</td>
+        <td class="p-2">${n.cpu} / ${n.mem}</td><td class="p-2">${n.pods}</td>
+      </tr>`).join("");
+
+      const filter = ($("podFilter").value || "").toLowerCase();
+      const pods = c.pods.filter(p => !filter || p.name.includes(filter) || p.ns.includes(filter));
+      $("podBody").innerHTML = pods.map(p => `<tr class="border-t border-ibm-line dark:border-neutral-700">
+        <td class="p-2 font-mono text-xs">${p.name}</td><td class="p-2">${p.ns}</td>
+        <td class="p-2">${statusPill(p.status)}</td><td class="p-2">${p.restarts}</td>
+        <td class="p-2 font-mono text-xs">${p.node}</td><td class="p-2">${p.age}</td>
+        <td class="p-2 whitespace-nowrap">
+          <button class="text-ibm-blue underline text-xs" data-log="${p.ns}/${p.name}">Logs</button>
+          <button class="text-ibm-blue underline text-xs ml-2" data-describe="${p.ns}/${p.name}">Describe</button>
+        </td>
+      </tr>`).join("");
+
+      $("deployBody").innerHTML = c.deploys.map((d, i) => `<tr class="border-t border-ibm-line dark:border-neutral-700">
+        <td class="p-2">${d.name}</td><td class="p-2">${d.ns}</td>
+        <td class="p-2">${d.ready}</td><td class="p-2 font-mono text-xs">${d.image}</td>
+        <td class="p-2 whitespace-nowrap">
+          <button class="text-ibm-blue underline text-xs" data-scale="${i}">Scale</button>
+          <button class="text-ibm-blue underline text-xs ml-2" data-restart="${i}">Restart</button>
+        </td>
+      </tr>`).join("");
+
+      $("svcBody").innerHTML = c.svcs.map(s => `<tr class="border-t border-ibm-line dark:border-neutral-700">
+        <td class="p-2">${s.name}</td><td class="p-2">${s.type}</td>
+        <td class="p-2 font-mono text-xs">${s.ip}</td><td class="p-2">${s.ports}</td><td class="p-2">${s.selector}</td>
+      </tr>`).join("");
+
+      $("logPod").innerHTML = c.pods.map(p => `<option value="${p.ns}/${p.name}">${p.ns}/${p.name}</option>`).join("");
+    }
+
+    function connect() {
+      const key = $("provider").value;
+      const ver = $("k8sVersion").value;
+      state.provider = key;
+      state.version = ver;
+      state.apiUrl = $("apiUrl").value.trim() || PROVIDERS[key].api;
+      state.cluster = makeCluster(key, ver);
+      state.connected = true;
+      const token = $("token").value.trim();
+      $("connectMsg").textContent = token
+        ? "Connected in guided mode. Token stays in this browser tab only. Live API calls from a web page are blocked by CORS unless you run a local proxy."
+        : "Connected to the guided cluster model for this host type. Add a token if you later place a CORS proxy in front of a real API.";
+      if (key !== "demo" && key !== "docker") {
+        fetch(state.apiUrl + "/version", { method: "GET" }).then(() => {}).catch(() => {});
+      }
+      render();
+      appendCmd(`# connected to ${PROVIDERS[key].name} @ ${state.apiUrl}\n# kubernetes ${state.cluster.version}`);
+    }
+
+    function disconnect() {
+      state.connected = false;
+      state.cluster = null;
+      $("connectMsg").textContent = "Disconnected.";
+      render();
+    }
+
+    function appendCmd(text) {
+      const box = $("cmdOut");
+      box.textContent += (box.textContent.endsWith("\n") ? "" : "\n") + text + "\n";
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function runCommand(raw) {
+      const line = raw.trim();
+      if (!line) return;
+      appendCmd("$ " + line);
+      if (!state.connected && line !== "help") {
+        appendCmd("Not connected. Choose a platform and press Connect.");
+        return;
+      }
+      const c = state.cluster;
+      if (line === "help") {
+        appendCmd(`Supported demo commands:
+  kubectl get nodes
+  kubectl get pods -A
+  kubectl get deploy -A
+  kubectl get svc -A
+  kubectl get componentstatuses
+  kubectl logs <ns>/<pod>
+  kubectl scale deploy/<name> --replicas=N -n <ns>
+  kubectl rollout restart deploy/<name> -n <ns>
+  kubectl delete pod <name> -n <ns>
+  kubectl version
+  kubectl api-resources
+Real clusters use the same ideas through the Kubernetes API:
+  GET /api/v1/nodes
+  GET /api/v1/pods
+  GET /apis/apps/v1/deployments`);
+        return;
+      }
+      if (line.includes("get nodes")) {
+        appendCmd("NAME\tSTATUS\tROLE\tKUBELET\n" + c.nodes.map(n => `${n.name}\t${n.status}\t${n.role}\t${n.kubelet}`).join("\n"));
+        return;
+      }
+      if (line.includes("get pods")) {
+        appendCmd("NAMESPACE\tNAME\tSTATUS\tRESTARTS\tNODE\n" + c.pods.map(p => `${p.ns}\t${p.name}\t${p.status}\t${p.restarts}\t${p.node}`).join("\n"));
+        return;
+      }
+      if (line.includes("get deploy")) {
+        appendCmd("NAMESPACE\tNAME\tREADY\tIMAGE\n" + c.deploys.map(d => `${d.ns}\t${d.name}\t${d.ready}\t${d.image}`).join("\n"));
+        return;
+      }
+      if (line.includes("get svc")) {
+        appendCmd("NAME\tTYPE\tCLUSTER-IP\tPORTS\n" + c.svcs.map(s => `${s.name}\t${s.type}\t${s.ip}\t${s.ports}`).join("\n"));
+        return;
+      }
+      if (line.includes("componentstatuses") || line.includes("get cs")) {
+        appendCmd(c.cp.map(x => `${x.name}\t${x.status}`).join("\n"));
+        return;
+      }
+      if (line.startsWith("kubectl version")) {
+        appendCmd(`Client Version: v${$("kubectlVer").value}.0\nServer Version: v${c.version}`);
+        return;
+      }
+      if (line.startsWith("kubectl api-resources")) {
+        appendCmd("NAME\tSHORTNAMES\tAPIVERSION\tNAMESPACED\npods\tpo\tv1\ttrue\nservices\tsvc\tv1\ttrue\ndeployments\tdeploy\tapps/v1\ttrue\nnodes\tno\tv1\tfalse");
+        return;
+      }
+      const scale = line.match(/scale deploy\/(\S+)\s+--replicas=(\d+)(?:\s+-n\s+(\S+))?/);
+      if (scale) {
+        const d = c.deploys.find(x => x.name === scale[1] && (!scale[3] || x.ns === scale[3]));
+        if (!d) { appendCmd("Error: deployment not found"); return; }
+        d.replicas = Number(scale[2]);
+        d.ready = `${scale[2]}/${scale[2]}`;
+        const existing = c.pods.filter(p => p.name.startsWith(d.name + "-"));
+        while (existing.length < d.replicas) {
+          const p = { name: `${d.name}-6f8d9c4b7-${Math.random().toString(16).slice(2,8)}`, ns: d.ns, status: "Running", restarts: 0, node: c.nodes[0].name, age: "1s" };
+          c.pods.push(p); existing.push(p);
+        }
+        while (existing.length > d.replicas) {
+          const drop = existing.pop();
+          c.pods = c.pods.filter(p => p.name !== drop.name);
+        }
+        appendCmd(`deployment.apps/${d.name} scaled`);
+        render();
+        return;
+      }
+      const restart = line.match(/rollout restart deploy\/(\S+)(?:\s+-n\s+(\S+))?/);
+      if (restart) {
+        const d = c.deploys.find(x => x.name === restart[1]);
+        if (!d) { appendCmd("Error: deployment not found"); return; }
+        appendCmd(`deployment.apps/${d.name} restarted`);
+        return;
+      }
+      const del = line.match(/delete pod (\S+)(?:\s+-n\s+(\S+))?/);
+      if (del) {
+        const before = c.pods.length;
+        c.pods = c.pods.filter(p => !(p.name === del[1] && (!del[2] || p.ns === del[2])));
+        appendCmd(before === c.pods.length ? "Error: pod not found" : `pod "${del[1]}" deleted`);
+        render();
+        return;
+      }
+      const logs = line.match(/logs (\S+)/);
+      if (logs) {
+        showLogs(logs[1]);
+        appendCmd(`# logs streamed to the Logs panel for ${logs[1]}`);
+        return;
+      }
+      appendCmd("Unknown command in this deck. Type help.");
+    }
+
+    function fakeLogLine(pod) {
+      const msgs = [
+        "GET /healthz 200 1ms",
+        "ready to serve traffic",
+        "reconcile loop ok",
+        "connection from 10.0.1.14",
+        "cache warmed",
+        pod.includes("payments") ? "ERROR database password rejected" : "processed batch size=25",
+        pod.includes("payments") ? "panic: missing PAYMENTS_DSN" : "metrics exported"
+      ];
+      const ts = new Date().toISOString();
+      return `${ts} [${pod}] ${msgs[Math.floor(Math.random()*msgs.length)]}`;
+    }
+
+    function showLogs(ref) {
+      $("logPod").value = ref;
+      const box = $("logBox");
+      box.textContent = `# GET ${state.apiUrl}/api/v1/namespaces/${ref.split("/")[0]}/pods/${ref.split("/")[1]}/log\n`;
+      for (let i = 0; i < 12; i++) box.textContent += fakeLogLine(ref) + "\n";
+      box.scrollTop = box.scrollHeight;
+      if (state.followTimer) clearInterval(state.followTimer);
+      if ($("logFollow").checked) {
+        state.followTimer = setInterval(() => {
+          box.textContent += fakeLogLine(ref) + "\n";
+          box.scrollTop = box.scrollHeight;
+        }, 1200);
+      }
+    }
+
+    const MODALS = {
+      help: {
+        title: "How this dashboard works",
+        html: `<p>This is a full control deck you can open in any browser. It has two layers:</p>
+        <ol class="list-decimal pl-5 space-y-1">
+          <li><strong>Guided cluster model.</strong> When you pick EKS, GKE, AKS, OpenShift, IBM, Docker, or Demo, the page builds a realistic cluster picture for that host type so you can practice status, logs, scale, and upgrades safely.</li>
+          <li><strong>Real API path.</strong> Kubernetes is just HTTPS. A real tool would call <code>/api/v1/nodes</code>, <code>/api/v1/pods</code>, and <code>/apis/apps/v1/deployments</code> with a bearer token from kubeconfig. Browsers block most of those calls because of CORS, so production dashboards sit behind a small server or use the official dashboard / Lens / OpenShift console.</li>
+        </ol>
+        <p>Use font size 14–36 at the top if the tables feel small on a phone. Switch Dark mode when you work at night.</p>`
+      },
+      connectHelp: {
+        title: "Connecting a real cluster",
+        html: `<p>On your laptop, <code>kubectl</code> already knows how to connect. It reads <code>~/.kube/config</code>.</p>
+        <p>A web page cannot safely ship that file to the internet. To hook this UI to a live API later:</p>
+        <ol class="list-decimal pl-5 space-y-1">
+          <li>Keep the cluster private.</li>
+          <li>Run a tiny local proxy that adds CORS headers and injects your token.</li>
+          <li>Paste the proxy URL in “API server URL”.</li>
+        </ol>
+        <p>Managed clouds hide the control plane machines. EKS, GKE, AKS, and IBM still expose the same Kubernetes API.</p>
+        <p><a class="text-ibm-blue underline" href="https://kubernetes.io/docs/reference/kubernetes-api/" target="_blank" rel="noopener">Official API reference</a></p>`
+      },
+      learnArch: {
+        title: "The school picture of a cluster",
+        html: `<p>A cluster is two kinds of machines working together.</p>
+        <p><strong>Control plane</strong> (principal’s office): API server, etcd notebook, scheduler, and controllers.</p>
+        <p><strong>Worker nodes</strong> (classrooms): kubelet, container runtime, and kube-proxy.</p>
+        <p>You never “SSH into every server and start an app by hand.” You tell the API what you want. Controllers keep watching until the world matches the wish.</p>
+        <p><a class="text-ibm-blue underline" href="https://kubernetes.io/docs/concepts/architecture/" target="_blank" rel="noopener">kubernetes.io architecture</a></p>`
+      },
+      learnControl: {
+        title: "Control plane parts",
+        html: `<p><strong>kube-apiserver</strong> — the only front door. Dashboards, kubectl, Helm, and operators all talk to it.</p>
+        <p><strong>etcd</strong> — a special database that stores Pods, Secrets, and every other object.</p>
+        <p><strong>kube-scheduler</strong> — chooses a Node for each new Pod.</p>
+        <p><strong>kube-controller-manager</strong> — a bundle of loops: replica counts, node health, jobs, and more.</p>
+        <p><strong>cloud-controller-manager</strong> — creates cloud load balancers and disks on EKS, GKE, AKS, and IBM.</p>`
+      },
+      learnNodes: {
+        title: "Nodes",
+        html: `<p>A Node is a computer (virtual or physical) that can run Pods. Each Node runs:</p>
+        <ul class="list-disc pl-5">
+          <li><strong>kubelet</strong> — the node agent that talks to the API server.</li>
+          <li><strong>container runtime</strong> — often containerd. Docker Desktop still works for local learning.</li>
+          <li><strong>kube-proxy</strong> — helps Services send traffic to Pods.</li>
+        </ul>
+        <p>Kubelet must not be newer than the API server. It may be up to three minor versions older.</p>`
+      },
+      learnPods: {
+        title: "Pods",
+        html: `<p>A Pod is the smallest thing Kubernetes runs. Usually it holds one container. Sometimes it holds two that must share a network and a disk (a helper “sidecar”).</p>
+        <p>Pods are mortal. If a Node dies, the Pod dies. A Deployment then creates a replacement Pod. That is why you almost never create a lonely Pod in production — you create a Deployment.</p>`
+      },
+      learnSvc: {
+        title: "Services",
+        html: `<p>Pods change IP addresses when they restart. A Service is a stable name and IP in front of a set of Pods.</p>
+        <ul class="list-disc pl-5">
+          <li><strong>ClusterIP</strong> — only inside the cluster.</li>
+          <li><strong>NodePort</strong> — opens the same high port on every Node.</li>
+          <li><strong>LoadBalancer</strong> — asks the cloud for a public address (EKS/GKE/AKS/IBM).</li>
+        </ul>`
+      },
+      learnYaml: {
+        title: "A tiny Deployment file",
+        html: `<pre class="bg-ibm-wash dark:bg-neutral-900 p-3 overflow-auto text-xs">apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: apps
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      containers:
+      - name: web
+        image: ghcr.io/demo/web:1.4.2
+        ports:
+        - containerPort: 8080</pre>
+        <p>That file is the wish. Apply it with <code>kubectl apply -f web.yaml</code> or Helm.</p>`
+      },
+      learnSafety: {
+        title: "Safety on real clusters",
+        html: `<ul class="list-disc pl-5 space-y-1">
+          <li>Never paste production tokens into random websites.</li>
+          <li>Use least-privilege RBAC ServiceAccounts.</li>
+          <li>Do not expose the API server to the public internet without extra locks.</li>
+          <li>Prefer managed control planes (EKS, GKE, AKS, IBM, OpenShift) for production.</li>
+          <li>Practice first on kind, minikube, or this demo deck.</li>
+        </ul>`
+      },
+      learnProviders: {
+        title: "Hosting platforms",
+        html: `<p><strong>Local Docker / kind / minikube</strong> — best classroom. One computer pretends to be a cluster.</p>
+        <p><strong>Amazon EKS</strong> — AWS runs the API server. You run node groups or Fargate. Long version support (standard + extended).</p>
+        <p><strong>Google GKE</strong> — release channels (Rapid, Regular, Stable, Extended). Strong automatic upgrades.</p>
+        <p><strong>Azure AKS</strong> — Azure-managed API. Premium LTS option for regulated teams.</p>
+        <p><strong>Red Hat OpenShift</strong> — Kubernetes plus extra guard rails, a web console, Routes, and Operators. Versions look like 4.22 and ship a specific Kubernetes underneath.</p>
+        <p><strong>IBM Cloud Kubernetes / ROKS</strong> — IBM-managed Kubernetes or managed OpenShift in IBM regions such as us-south.</p>`
+      }
+    };
+
+    function openModal(key, extra) {
+      const root = $("modalRoot");
+      const known = MODALS[key];
+      if (known) {
+        $("modalTitle").textContent = known.title;
+        $("modalBody").innerHTML = known.html;
+      } else if (key.startsWith("comp-")) {
+        const name = key.slice(5);
+        $("modalTitle").textContent = name;
+        $("modalBody").innerHTML = `<p>This component is part of the control plane on ${state.cluster ? state.cluster.provider.name : "your cluster"}.</p>
+          <p>Live health is normally read from static pod logs, /readyz, and /livez on the API server.</p>
+          <p><a class="text-ibm-blue underline" href="https://kubernetes.io/docs/concepts/architecture/" target="_blank" rel="noopener">Read the official component list</a></p>`;
+      } else {
+        $("modalTitle").textContent = extra || key;
+        $("modalBody").innerHTML = extra || "";
+      }
+      root.classList.remove("hidden");
+      document.body.classList.add("modal-open");
+    }
+
+    function closeModal() {
+      $("modalRoot").classList.add("hidden");
+      document.body.classList.remove("modal-open");
+    }
+
+    function checkSkew() {
+      const k8s = $("helmK8s").value;
+      const helm = $("helmVer").value;
+      const kubectl = $("kubectlVer").value;
+      const k = Number(k8s.split(".")[1]);
+      const kc = Number(kubectl.split(".")[1]);
+      const lines = [];
+      const helmOk = (HELM_SUPPORT[helm] || []).includes(k8s);
+      if (helm === "2.17") {
+        lines.push("Helm 2 is retired. It is not safe on modern clusters. Move to Helm 3.");
+      } else if (helmOk) {
+        lines.push(`Helm ${helm}.x is in the published support window for Kubernetes ${k8s}.x (Helm n−3 policy).`);
+      } else {
+        lines.push(`Conflict: Helm ${helm}.x is not listed for Kubernetes ${k8s}.x. Upgrade Helm toward 3.22 for 1.37, or match the table on helm.sh.`);
+      }
+      if (Math.abs(k - kc) <= 1) {
+        lines.push(`kubectl ${kubectl} is within ±1 minor of the cluster (${k8s}). Official kubectl skew policy is satisfied.`);
+      } else {
+        lines.push(`Conflict: kubectl ${kubectl} is more than one minor away from cluster ${k8s}. Unexpected apply/get behavior is likely.`);
+      }
+      if (state.cluster) {
+        const nodeMinors = state.cluster.nodes.map(n => Number((n.kubelet || "1.37").split(".")[1]));
+        const newest = Math.max(...nodeMinors);
+        const oldest = Math.min(...nodeMinors);
+        if (newest > k) lines.push("Conflict: a kubelet is newer than kube-apiserver. That is not supported.");
+        else if (k - oldest > 3) lines.push("Conflict: a kubelet is more than three minors behind the API server.");
+        else lines.push("Node kubelets in this model match the supported skew window (kubelet ≤ apiserver, and not more than 3 minors older).");
+      }
+      $("skewResult").innerHTML = lines.map(l => `<p>${l}</p>`).join("");
+    }
+
+    function planUpgrade() {
+      if (!state.connected) {
+        $("upgradePlan").classList.remove("hidden");
+        $("upgradePlan").textContent = "Connect a cluster first.";
+        return;
+      }
+      const cur = Number(state.version.split(".")[1]);
+      const next = cur + 1;
+      const box = $("upgradePlan");
+      box.classList.remove("hidden");
+      if (cur >= 37) {
+        box.textContent = `Cluster is already on the current standard line (1.${cur}). Watch for 1.38 on the official schedule. Apply the latest patch (${state.cluster.version}) and keep Helm on 3.22.x.`;
+        return;
+      }
+      box.textContent = `Upgrade plan for ${state.cluster.provider.name}
+Current: Kubernetes ${state.cluster.version}
+Next allowed minor: 1.${next}  (do not skip a minor)
+
+1. Snapshot etcd / take a managed backup (${state.provider === "eks" ? "EKS control plane is backed up by AWS; snapshot workloads and node AMIs" : "use your cloud snapshot or etcd snapshot"}).
+2. Upgrade kubectl and Helm on your laptop first so the client is not older than the new API.
+3. Upgrade kube-apiserver to 1.${next}.x.
+4. Upgrade kube-controller-manager, kube-scheduler, and cloud-controller-manager to the same minor.
+5. Upgrade CNI / CSI / Ingress / Operators that document 1.${next} support.
+6. Drain and upgrade worker kubelets one node at a time.
+7. Run helm list -A and re-check this Version Conflicts panel.
+8. Read https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/kubeadm-upgrade/
+
+Managed notes:
+- EKS: upgrade control plane in the AWS console or eksctl, then node groups / Karpenter.
+- GKE: pick Rapid/Regular/Stable/Extended channel; Google can upgrade both planes.
+- AKS: az aks upgrade --kubernetes-version.
+- OpenShift: use the OpenShift upgrade graph (4.x), not raw kubeadm.
+- IBM: use the IBM Cloud console or CLI for IKS/ROKS.`;
+    }
+
+    // events
+    $("provider").addEventListener("change", () => {
+      const p = PROVIDERS[$("provider").value];
+      $("apiUrl").value = p.api;
+    });
+    $("connectBtn").addEventListener("click", connect);
+    $("disconnectBtn").addEventListener("click", disconnect);
+    $("refreshBtn").addEventListener("click", () => { if (state.connected) { state.cluster = makeCluster(state.provider, state.version); render(); } });
+    $("podFilter").addEventListener("input", render);
+    $("logBtn").addEventListener("click", () => { if (!state.connected) { $("logBox").textContent = "Connect first."; return; } showLogs($("logPod").value); });
+    $("logClear").addEventListener("click", () => { if (state.followTimer) clearInterval(state.followTimer); $("logBox").textContent = ""; });
+    $("cmdRun").addEventListener("click", () => runCommand($("cmdInput").value));
+    $("cmdInput").addEventListener("keydown", (e) => { if (e.key === "Enter") runCommand($("cmdInput").value); });
+    document.querySelectorAll(".cmd-chip").forEach(b => b.addEventListener("click", () => { $("cmdInput").value = b.dataset.cmd; runCommand(b.dataset.cmd); }));
+    $("checkSkew").addEventListener("click", checkSkew);
+    $("planUpgrade").addEventListener("click", planUpgrade);
+    $("addDeployBtn").addEventListener("click", () => {
+      if (!state.connected) return openModal("help");
+      const name = prompt("Deployment name?", "storefront");
+      if (!name) return;
+      const replicas = Number(prompt("How many copies (replicas)?", "2")) || 1;
+      state.cluster.deploys.push({ name, ns: "apps", ready: replicas + "/" + replicas, replicas, image: "ghcr.io/demo/" + name + ":1.0.0" });
+      for (let i = 0; i < replicas; i++) {
+        state.cluster.pods.push({ name: `${name}-7b5c8d9f6-${i}aa`, ns: "apps", status: "Running", restarts: 0, node: state.cluster.nodes[0].name, age: "1s" });
+      }
+      render();
+    });
+    document.body.addEventListener("click", (e) => {
+      const m = e.target.closest("[data-modal]");
+      if (m) openModal(m.dataset.modal);
+      if (e.target.dataset.log) {
+        document.getElementById("logs").scrollIntoView({ behavior: "smooth" });
+        showLogs(e.target.dataset.log);
+      }
+      if (e.target.dataset.describe) {
+        const ref = e.target.dataset.describe;
+        const [ns, name] = ref.split("/");
+        const pod = state.cluster.pods.find(p => p.name === name);
+        openModal("custom");
+        $("modalTitle").textContent = "kubectl describe pod " + name;
+        $("modalBody").innerHTML = `<pre class="bg-ibm-wash dark:bg-neutral-900 p-3 overflow-auto text-xs">Name: ${name}
+Namespace: ${ns}
+Node: ${pod ? pod.node : "?"}
+Status: ${pod ? pod.status : "?"}
+Restarts: ${pod ? pod.restarts : "?"}
+QoS Class: Burstable
+Events:
+  Normal  Scheduled  Successfully assigned ${ns}/${name}
+  Normal  Pulled     Container image already present
+  ${pod && pod.status === "CrashLoopBackOff" ? "Warning BackOff  Back-off restarting failed container" : "Normal Started   Container started"}</pre>`;
+      }
+      if (e.target.dataset.scale != null) {
+        const d = state.cluster.deploys[Number(e.target.dataset.scale)];
+        const n = Number(prompt("New replica count for " + d.name, String(d.replicas)));
+        if (!n && n !== 0) return;
+        runCommand(`kubectl scale deploy/${d.name} --replicas=${n} -n ${d.ns}`);
+      }
+      if (e.target.dataset.restart != null) {
+        const d = state.cluster.deploys[Number(e.target.dataset.restart)];
+        runCommand(`kubectl rollout restart deploy/${d.name} -n ${d.ns}`);
+      }
+    });
+    $("modalClose").addEventListener("click", closeModal);
+    $("modalBackdrop").addEventListener("click", closeModal);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+
+    $("themeBtn").addEventListener("click", () => {
+      const html = document.documentElement;
+      const dark = html.classList.toggle("dark");
+      $("themeBtn").textContent = dark ? "Light" : "Dark";
+      localStorage.setItem("k8-theme", dark ? "dark" : "light");
+    });
+    $("fontRange").addEventListener("input", () => {
+      const v = $("fontRange").value;
+      document.documentElement.style.setProperty("--base-font", v + "px");
+      $("fontLabel").textContent = v + "px";
+      localStorage.setItem("k8-font", v);
+    });
+
+    (function init() {
+      const theme = localStorage.getItem("k8-theme");
+      if (theme === "dark") { document.documentElement.classList.add("dark"); $("themeBtn").textContent = "Light"; }
+      const font = localStorage.getItem("k8-font");
+      if (font) {
+        $("fontRange").value = font;
+        document.documentElement.style.setProperty("--base-font", font + "px");
+        $("fontLabel").textContent = font + "px";
+      }
+      $("apiUrl").value = PROVIDERS.demo.api;
+      $("skewResult").textContent = "Choose Helm, kubectl, and cluster versions, then press Check conflicts.";
+    })();
+  </script>
+</body>
+</html>
